@@ -21,7 +21,7 @@ public class EmailService {
         String body = "<h2>Seu código de confirmação é:</h2><p><strong>" + code + "</strong></p>";
 
         CreateEmailOptions params = CreateEmailOptions.builder()
-                .from("Acme <onboarding@resend.dev>")
+                .from("noreply-clinichubcrm <contato@clinichubcrm.com>")
                 .to(to)
                 .subject(subject)
                 .html(body)
