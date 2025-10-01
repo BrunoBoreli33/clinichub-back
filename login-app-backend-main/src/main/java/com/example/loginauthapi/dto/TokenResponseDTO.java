@@ -1,3 +1,3 @@
 package com.example.loginauthapi.dto;
 
-public record TokenResponseDTO(String name, String token) { }
+public record TokenResponseDTO(String id, String name, String token) { }

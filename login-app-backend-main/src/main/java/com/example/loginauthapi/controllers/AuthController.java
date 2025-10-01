@@ -50,7 +50,7 @@ public class AuthController {
 
         // sucesso → retorna token e nome
         String token = tokenService.generateToken(user);
-        return ResponseEntity.ok(new TokenResponseDTO(user.getName(), token));
+        return ResponseEntity.ok(new TokenResponseDTO(user.getId(), user.getName(), token));
     }
 
 
@@ -126,7 +126,7 @@ public class AuthController {
         tempUserService.removeTempUser(body.email());
 
         // Retorna a resposta com o token
-        return ResponseEntity.ok(new TokenResponseDTO(newUser.getName(), token));
+        return ResponseEntity.ok(new TokenResponseDTO(newUser.getId(), newUser.getName(), token));
 
     }
 }
