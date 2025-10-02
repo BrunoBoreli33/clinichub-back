@@ -41,6 +41,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/confirm").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/dashboard").authenticated()
                         .requestMatchers(
                                 "/h2-console/**",
                                 "/webjars/**",
