@@ -30,18 +30,17 @@ public class SecurityConfig {
         http
                 .csrf(csrf -> csrf.disable())
                 .cors(Customizer.withDefaults())
-
-                // Add this line to fix the X-Frame-Options issue
                 .headers(headers -> headers
                         .frameOptions(frame -> frame.sameOrigin())
                 )
-
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
+                        // Endpoints públicos
                         .requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/confirm").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/dashboard").authenticated()
+
+                        // H2 Console e recursos estáticos
                         .requestMatchers(
                                 "/h2-console/**",
                                 "/webjars/**",
@@ -51,6 +50,11 @@ public class SecurityConfig {
                                 "/images/**",
                                 "/static/**"
                         ).permitAll()
+
+                        // Todos os endpoints /dashboard/** precisam de autenticação
+                        .requestMatchers("/dashboard/**").authenticated()
+
+                        // Qualquer outra requisição precisa de autenticação
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class);

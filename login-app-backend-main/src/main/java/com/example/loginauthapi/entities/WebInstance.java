@@ -7,6 +7,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Getter
 @Setter
@@ -42,6 +44,10 @@ public class WebInstance {
 
     @Column(name = "sua_instancia", nullable = false)
     private String suaInstancia;
+
+    // Relacionamento 1:N -> uma WebInstance pode ter vários Chats
+    @OneToMany(mappedBy = "webInstance", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Chat> chats = new ArrayList<>();
 
     @PrePersist
     public void prePersist() {

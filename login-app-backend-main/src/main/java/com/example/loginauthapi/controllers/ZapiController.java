@@ -1,10 +1,14 @@
 package com.example.loginauthapi.controllers;
 
-
+import com.example.loginauthapi.dto.ChatsListResponseDTO;
+import com.example.loginauthapi.entities.User;
+import com.example.loginauthapi.services.ChatService;
 import com.example.loginauthapi.services.zapi.ZapiQRCodeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -16,17 +20,23 @@ import java.util.Map;
 public class ZapiController {
 
     private final ZapiQRCodeService zapiQRCodeService;
+    private final ChatService chatService;
 
     /**
      * Endpoint para obter o QR Code do WhatsApp Business
-     * GET /api/whatsapp/qr-code
+     * GET /dashboard/zapi/qr-code
+     *
+     * Busca a instância ativa do usuário autenticado e gera o QR Code
      */
     @GetMapping("/qr-code")
     public ResponseEntity<Map<String, Object>> getQRCode() {
         log.info("Requisição recebida para gerar QR Code");
 
         try {
-            Map<String, Object> result = zapiQRCodeService.getQRCode();
+            User authenticatedUser = getAuthenticatedUser();
+
+            // Passa o usuário para o serviço buscar a instância ativa
+            Map<String, Object> result = zapiQRCodeService.getQRCode(authenticatedUser);
 
             if (Boolean.TRUE.equals(result.get("success"))) {
                 return ResponseEntity.ok(result);
@@ -39,21 +49,27 @@ public class ZapiController {
             return ResponseEntity.internalServerError()
                     .body(Map.of(
                             "success", false,
-                            "message", "Erro interno ao processar solicitação"
+                            "message", "Erro interno ao processar solicitação: " + e.getMessage()
                     ));
         }
     }
 
     /**
      * Endpoint para verificar status da conexão
-     * GET /api/whatsapp/status
+     * GET /dashboard/zapi/status
+     *
+     * Verifica o status da instância ativa do usuário autenticado
      */
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getConnectionStatus() {
         log.info("Verificando status da conexão WhatsApp");
 
         try {
-            Map<String, Object> result = zapiQRCodeService.getConnectionStatus();
+            User authenticatedUser = getAuthenticatedUser();
+
+            // Passa o usuário para o serviço buscar a instância ativa
+            Map<String, Object> result = zapiQRCodeService.getConnectionStatus(authenticatedUser);
+
             return ResponseEntity.ok(result);
 
         } catch (Exception e) {
@@ -62,9 +78,178 @@ public class ZapiController {
                     .body(Map.of(
                             "success", false,
                             "connected", false,
-                            "message", "Erro ao verificar status"
+                            "message", "Erro ao verificar status: " + e.getMessage()
                     ));
         }
     }
 
+    /**
+     * Endpoint para sincronizar e obter informações de chats
+     * GET /dashboard/zapi/chats_info
+     *
+     * Sincroniza com a Z-API e retorna todos os chats da instância ativa do usuário
+     */
+    @GetMapping("/chats_info")
+    public ResponseEntity<ChatsListResponseDTO> getChatsInfo() {
+        log.info("Requisição recebida para obter informações de chats");
+
+        try {
+            User authenticatedUser = getAuthenticatedUser();
+
+            // Sincronizar e buscar chats
+            ChatsListResponseDTO response = chatService.syncAndGetChats(authenticatedUser);
+
+            if (response.isSuccess()) {
+                log.info("Chats carregados com sucesso para usuário {}: {} chats, {} não lidos",
+                        authenticatedUser.getId(),
+                        response.getTotalChats(),
+                        response.getUnreadCount());
+                return ResponseEntity.ok(response);
+            } else {
+                log.warn("Falha ao carregar chats: {}", response.getMessage());
+                return ResponseEntity.badRequest().body(response);
+            }
+
+        } catch (Exception e) {
+            log.error("Erro ao processar requisição de chats", e);
+            return ResponseEntity.internalServerError()
+                    .body(ChatsListResponseDTO.builder()
+                            .success(false)
+                            .message("Erro interno ao processar solicitação: " + e.getMessage())
+                            .totalChats(0)
+                            .unreadCount(0)
+                            .build());
+        }
+    }
+
+    /**
+     * Endpoint alternativo para buscar chats apenas do banco (sem sincronizar)
+     * GET /dashboard/zapi/chats
+     *
+     * Mais rápido, não faz requisições à Z-API
+     */
+    @GetMapping("/chats")
+    public ResponseEntity<ChatsListResponseDTO> getChats() {
+        log.info("Requisição recebida para obter chats do banco");
+
+        try {
+            User authenticatedUser = getAuthenticatedUser();
+            ChatsListResponseDTO response = chatService.getChatsFromDatabase(authenticatedUser);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Erro ao buscar chats do banco", e);
+            return ResponseEntity.internalServerError()
+                    .body(ChatsListResponseDTO.builder()
+                            .success(false)
+                            .message("Erro ao buscar chats: " + e.getMessage())
+                            .totalChats(0)
+                            .unreadCount(0)
+                            .build());
+        }
+    }
+
+    /**
+     * Endpoint para atualizar a coluna de um chat
+     * PUT /dashboard/zapi/chats/{chatId}/column
+     */
+    @PutMapping("/chats/{chatId}/column")
+    public ResponseEntity<Map<String, Object>> updateChatColumn(
+            @PathVariable String chatId,
+            @RequestBody Map<String, String> body) {
+
+        try {
+            String column = body.get("column");
+
+            if (column == null || column.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "Coluna não informada"
+                ));
+            }
+
+            chatService.updateChatColumn(chatId, column);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Coluna atualizada com sucesso"
+            ));
+
+        } catch (Exception e) {
+            log.error("Erro ao atualizar coluna do chat {}", chatId, e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "success", false,
+                    "message", "Erro ao atualizar coluna: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * Endpoint para associar um ticket a um chat
+     * PUT /dashboard/zapi/chats/{chatId}/ticket
+     */
+    @PutMapping("/chats/{chatId}/ticket")
+    public ResponseEntity<Map<String, Object>> assignTicket(
+            @PathVariable String chatId,
+            @RequestBody Map<String, String> body) {
+
+        try {
+            String ticketId = body.get("ticketId");
+
+            if (ticketId == null || ticketId.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "ID do ticket não informado"
+                ));
+            }
+
+            chatService.assignTicketToChat(chatId, ticketId);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Ticket associado com sucesso"
+            ));
+
+        } catch (Exception e) {
+            log.error("Erro ao associar ticket ao chat {}", chatId, e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "success", false,
+                    "message", "Erro ao associar ticket: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * Método auxiliar para obter o usuário autenticado
+     */
+    private User getAuthenticatedUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        if (authentication == null || !authentication.isAuthenticated()) {
+            log.error("Autenticação não encontrada ou inválida");
+            throw new RuntimeException("Usuário não autenticado");
+        }
+
+        Object principal = authentication.getPrincipal();
+
+        log.debug("Principal type: {}", principal.getClass().getName());
+
+        // O SecurityFilter injeta o User diretamente como principal
+        if (principal instanceof User) {
+            User user = (User) principal;
+            log.debug("Usuário autenticado: ID={}, Email={}", user.getId(), user.getEmail());
+            return user;
+        }
+
+        // Fallback: se for UserDetails do Spring Security
+        if (principal instanceof org.springframework.security.core.userdetails.UserDetails) {
+            String email = ((org.springframework.security.core.userdetails.UserDetails) principal).getUsername();
+            log.error("Principal é UserDetails, mas deveria ser User. Email: {}", email);
+            throw new RuntimeException("Configuração incorreta - User não injetado no contexto");
+        }
+
+        log.error("Tipo de principal não reconhecido: {}", principal.getClass().getName());
+        throw new RuntimeException("Usuário não encontrado no contexto de segurança");
+    }
 }
