@@ -30,6 +30,7 @@ public class AuthController {
     private final EmailService emailService;
 
     @PostMapping("/login")
+    @Transactional
     public ResponseEntity<?> login(@RequestBody LoginRequestDTO body) {
         // tenta encontrar o usuário
         Optional<User> optionalUser = repository.findByEmail(body.email());
@@ -48,8 +49,13 @@ public class AuthController {
                     .body("Senha incorreta");
         }
 
-        // sucesso → retorna token e nome
+        // sucesso → gera novo token
         String token = tokenService.generateToken(user);
+
+        // Atualiza o token no banco de dados
+        user.setConfirmationToken(token);
+        repository.save(user);
+
         return ResponseEntity.ok(new TokenResponseDTO(user.getId(), user.getName(), token));
     }
 
