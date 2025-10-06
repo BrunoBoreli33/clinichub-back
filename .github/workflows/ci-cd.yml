@@ -1,9 +1,9 @@
 name: CI/CD - build → push image → render deploy
 on:
   push:
-    branches: [ devops ]
+    branches: [ main ]
   pull_request:
-    branches: [ devops ]
+    branches: [ main ]
 
 permissions:
   contents: read
