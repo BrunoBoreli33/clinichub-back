@@ -31,4 +31,10 @@ public interface WebInstanceRepository extends JpaRepository<WebInstance, String
      * Buscar uma instância pela suaInstancia
      */
     Optional<WebInstance> findBySuaInstancia(String suaInstancia);
+
+    // NOVOS MÉTODOS para o controller de dev
+    List<WebInstance> findByStatus(String status);
+
+    List<WebInstance> findByUserIdAndStatus(String userId, String status);
+
 }

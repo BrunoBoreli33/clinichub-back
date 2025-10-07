@@ -21,6 +21,8 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,6 +34,54 @@ public class ChatService {
     private final WebInstanceRepository webInstanceRepository;
     private final ZapiChatService zapiChatService;
 
+    // NOVA ESTRUTURA: Armazenar progresso do carregamento por userId
+    private final ConcurrentHashMap<String, LoadingProgress> loadingProgressMap = new ConcurrentHashMap<>();
+
+    // NOVA CLASSE INTERNA: Para rastrear o progresso
+    public static class LoadingProgress {
+        private final AtomicInteger total;
+        private final AtomicInteger loaded;
+        private volatile boolean completed;
+
+        public LoadingProgress(int total) {
+            this.total = new AtomicInteger(total);
+            this.loaded = new AtomicInteger(0);
+            this.completed = false;
+        }
+
+        public void incrementLoaded() {
+            loaded.incrementAndGet();
+        }
+
+        public int getPercentage() {
+            int t = total.get();
+            if (t == 0) return 100;
+            return (int) ((loaded.get() * 100.0) / t);
+        }
+
+        public int getTotal() {
+            return total.get();
+        }
+
+        public int getLoaded() {
+            return loaded.get();
+        }
+
+        public boolean isCompleted() {
+            return completed;
+        }
+
+        public void setCompleted(boolean completed) {
+            this.completed = completed;
+        }
+    }
+
+    // MÉTODO NOVO: Obter progresso do carregamento
+    public LoadingProgress getLoadingProgress(String userId) {
+        return loadingProgressMap.get(userId);
+    }
+
+    // MÉTODO MODIFICADO: Agora rastreia o progresso
     @Transactional
     public ChatsListResponseDTO syncAndGetChats(User user) {
         try {
@@ -43,8 +93,15 @@ public class ChatService {
                 return buildEmptyResponse();
             }
 
+            // NOVA LINHA: Inicializar progresso
+            LoadingProgress progress = new LoadingProgress(zapiChats.size());
+            loadingProgressMap.put(user.getId(), progress);
+
             List<Chat> syncedChats = syncChatsWithDatabase(activeInstance, zapiChats);
-            syncProfileThumbnailsAsync(activeInstance, syncedChats);
+
+            // MODIFICADO: Passar o progress para sincronização
+            syncProfileThumbnailsWithProgress(activeInstance, syncedChats, progress);
+
             return buildSuccessResponse(syncedChats);
 
         } catch (Exception e) {
@@ -120,6 +177,43 @@ public class ChatService {
                 .collect(Collectors.toList());
     }
 
+    // MÉTODO MODIFICADO: Agora atualiza o progresso
+    private void syncProfileThumbnailsWithProgress(WebInstance instance, List<Chat> chats, LoadingProgress progress) {
+        chats.forEach(chat -> {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    log.debug("Buscando foto de perfil para: {}", chat.getPhone());
+                    ZapiChatDetailResponseDTO detail = zapiChatService.getChatDetail(instance, chat.getPhone());
+
+                    if (detail != null) {
+                        if (detail.getProfileThumbnail() != null && !detail.getProfileThumbnail().isEmpty()) {
+                            chat.setProfileThumbnail(detail.getProfileThumbnail());
+                            chatRepository.save(chat);
+                            log.debug("Foto de perfil atualizada para {}: {}",
+                                    chat.getPhone(), detail.getProfileThumbnail());
+                        } else {
+                            log.debug("profileThumbnail vazio para: {}", chat.getPhone());
+                        }
+                    } else {
+                        log.debug("Detalhes do chat null para: {}", chat.getPhone());
+                    }
+                } catch (Exception e) {
+                    log.warn("Erro ao buscar foto de perfil para {}: {}", chat.getPhone(), e.getMessage());
+                } finally {
+                    // NOVA LINHA: Incrementar progresso
+                    progress.incrementLoaded();
+
+                    // NOVA LINHA: Marcar como completo se todos foram carregados
+                    if (progress.getLoaded() >= progress.getTotal()) {
+                        progress.setCompleted(true);
+                        log.info("Carregamento de fotos completo: {}/{}", progress.getLoaded(), progress.getTotal());
+                    }
+                }
+            });
+        });
+    }
+
+    // MANTIDO: Método sem modificações para buscar do banco
     private void syncProfileThumbnailsAsync(WebInstance instance, List<Chat> chats) {
         chats.forEach(chat -> {
             CompletableFuture.runAsync(() -> {

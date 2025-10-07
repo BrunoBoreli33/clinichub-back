@@ -128,6 +128,53 @@ public class ZapiController {
      *
      * Mais rápido, não faz requisições à Z-API
      */
+
+
+    /**
+     * Endpoint para verificar o progresso do carregamento de fotos
+     * GET /dashboard/zapi/chats_loading_progress
+     *
+     * Retorna o progresso do carregamento das fotos dos contatos
+     */
+    @GetMapping("/chats_loading_progress")
+    public ResponseEntity<Map<String, Object>> getChatsLoadingProgress() {
+        log.info("Requisição recebida para verificar progresso de carregamento");
+
+        try {
+            User authenticatedUser = getAuthenticatedUser();
+            ChatService.LoadingProgress progress = chatService.getLoadingProgress(authenticatedUser.getId());
+
+            if (progress == null) {
+                // Ainda não iniciou ou já foi concluído há muito tempo
+                return ResponseEntity.ok(Map.of(
+                        "loading", false,
+                        "completed", true,
+                        "percentage", 100,
+                        "loaded", 0,
+                        "total", 0
+                ));
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "loading", true,
+                    "completed", progress.isCompleted(),
+                    "percentage", progress.getPercentage(),
+                    "loaded", progress.getLoaded(),
+                    "total", progress.getTotal()
+            ));
+
+        } catch (Exception e) {
+            log.error("Erro ao verificar progresso de carregamento", e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of(
+                            "loading", false,
+                            "completed", false,
+                            "error", e.getMessage()
+                    ));
+        }
+    }
+
+
     @GetMapping("/chats")
     public ResponseEntity<ChatsListResponseDTO> getChats() {
         log.info("Requisição recebida para obter chats do banco");

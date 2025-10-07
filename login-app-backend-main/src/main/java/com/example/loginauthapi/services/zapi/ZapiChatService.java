@@ -31,7 +31,7 @@ public class ZapiChatService {
      */
     public List<ZapiChatItemDTO> getChats(WebInstance instance) {
         try {
-            String url = String.format("%s/instances/%s/token/%s/chats",
+            String url = String.format("%s/instances/%s/token/%s/chats?page=1&pageSize=100",
                     ZAPI_BASE_URL,
                     instance.getSuaInstancia(),
                     instance.getSeuToken());
