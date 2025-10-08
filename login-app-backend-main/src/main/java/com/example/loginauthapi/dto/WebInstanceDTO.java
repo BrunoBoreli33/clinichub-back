@@ -25,6 +25,10 @@ public class WebInstanceDTO {
     private String clientToken;
     private String seuToken;
     private String suaInstancia;
+
+    // ⭐ NOVO CAMPO: Telefone conectado
+    private String connectedPhone;
+
     private Integer totalChats;
 }
 
@@ -40,6 +44,10 @@ class CreateWebInstanceDTO {
     private String clientToken;
     private String seuToken;
     private String suaInstancia;
+
+    // ⭐ NOVO CAMPO: Telefone conectado (obrigatório)
+    private String connectedPhone;
+
     private LocalDateTime expiraEm;
 }
 
@@ -54,5 +62,9 @@ class UpdateWebInstanceDTO {
     private String clientToken;
     private String seuToken;
     private String suaInstancia;
+
+    // ⭐ NOVO CAMPO: Telefone conectado
+    private String connectedPhone;
+
     private LocalDateTime expiraEm;
 }

@@ -19,10 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/**
- * Controller para gerenciamento de WebInstances
- * APENAS PARA DESENVOLVEDORES/ADMINISTRADORES
- */
 @RestController
 @RequestMapping("/api/dev/webinstances")
 @RequiredArgsConstructor
@@ -32,9 +28,6 @@ public class WebInstanceController {
     private final WebInstanceRepository webInstanceRepository;
     private final UserRepository userRepository;
 
-    /**
-     * Verifica se o usuário autenticado é ADMIN
-     */
     private User getAuthenticatedAdmin() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 
@@ -44,7 +37,6 @@ public class WebInstanceController {
 
         User user = (User) auth.getPrincipal();
 
-        // IMPORTANTE: Verificar se o usuário tem role ADMIN
         if (!"ADMIN".equalsIgnoreCase(user.getRole())) {
             throw new RuntimeException("Acesso negado: apenas administradores podem acessar esta rota");
         }
@@ -53,9 +45,23 @@ public class WebInstanceController {
     }
 
     /**
-     * GET /api/dev/webinstances
-     * Lista todas as WebInstances (com paginação opcional)
+     * ⭐ NOVO: Desativa todas as WebInstances com status ACTIVE
+     * Garante que apenas uma instância possa estar ACTIVE por vez
      */
+    private void deactivateAllActiveInstances() {
+        List<WebInstance> activeInstances = webInstanceRepository.findByStatus("ACTIVE");
+
+        if (!activeInstances.isEmpty()) {
+            log.info("Desativando {} instâncias ACTIVE existentes", activeInstances.size());
+
+            for (WebInstance instance : activeInstances) {
+                instance.setStatus("DEACTIVATED");
+                webInstanceRepository.save(instance);
+                log.info("Instância {} desativada automaticamente", instance.getId());
+            }
+        }
+    }
+
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> listAllInstances(
@@ -63,7 +69,7 @@ public class WebInstanceController {
             @RequestParam(required = false) String userId) {
 
         try {
-            getAuthenticatedAdmin(); // Validação extra
+            getAuthenticatedAdmin();
 
             log.info("Listando WebInstances - Status: {}, UserId: {}", status, userId);
 
@@ -95,10 +101,6 @@ public class WebInstanceController {
         }
     }
 
-    /**
-     * GET /api/dev/webinstances/{id}
-     * Busca uma WebInstance específica por ID
-     */
     @GetMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> getInstanceById(@PathVariable String id) {
@@ -124,10 +126,6 @@ public class WebInstanceController {
         }
     }
 
-    /**
-     * POST /api/dev/webinstances
-     * Cria uma nova WebInstance
-     */
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> createInstance(@RequestBody Map<String, Object> body) {
@@ -136,12 +134,12 @@ public class WebInstanceController {
 
             log.info("Criando nova WebInstance");
 
-            // Validações
             String userId = (String) body.get("userId");
             String status = (String) body.get("status");
             String clientToken = (String) body.get("clientToken");
             String seuToken = (String) body.get("seuToken");
             String suaInstancia = (String) body.get("suaInstancia");
+            String connectedPhone = (String) body.get("connectedPhone");
 
             if (userId == null || userId.trim().isEmpty()) {
                 throw new RuntimeException("userId é obrigatório");
@@ -155,28 +153,39 @@ public class WebInstanceController {
             if (suaInstancia == null || suaInstancia.trim().isEmpty()) {
                 throw new RuntimeException("suaInstancia é obrigatório");
             }
+            if (connectedPhone == null || connectedPhone.trim().isEmpty()) {
+                throw new RuntimeException("connectedPhone é obrigatório");
+            }
 
-            // Buscar usuário
             User user = userRepository.findById(userId)
                     .orElseThrow(() -> new RuntimeException("Usuário não encontrado"));
 
-            // Criar WebInstance
+            // ⭐ VALIDAÇÃO: Se status for ACTIVE, desativar todas as outras
+            String finalStatus = status != null ? status : "ACTIVE";
+            if ("ACTIVE".equalsIgnoreCase(finalStatus)) {
+                log.info("Nova instância será ACTIVE - desativando todas as outras");
+                deactivateAllActiveInstances();
+            }
+
             WebInstance instance = new WebInstance();
             instance.setUser(user);
-            instance.setStatus(status != null ? status : "PENDING");
+            instance.setStatus(finalStatus);
             instance.setClientToken(clientToken);
             instance.setSeuToken(seuToken);
             instance.setSuaInstancia(suaInstancia);
+            instance.setConnectedPhone(connectedPhone);
 
-            // Expiração (opcional)
             if (body.containsKey("expiraEm") && body.get("expiraEm") != null) {
                 String expiraEmStr = (String) body.get("expiraEm");
-                instance.setExpiraEm(LocalDateTime.parse(expiraEmStr));
+                if (!expiraEmStr.isEmpty()) {
+                    instance.setExpiraEm(LocalDateTime.parse(expiraEmStr));
+                }
             }
 
             WebInstance saved = webInstanceRepository.save(instance);
 
-            log.info("WebInstance criada com sucesso: {}", saved.getId());
+            log.info("WebInstance criada com sucesso: {} | Status: {} | Expira em: {}",
+                    saved.getId(), saved.getStatus(), saved.getExpiraEm());
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
@@ -191,10 +200,6 @@ public class WebInstanceController {
         }
     }
 
-    /**
-     * PUT /api/dev/webinstances/{id}
-     * Atualiza uma WebInstance existente
-     */
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> updateInstance(
@@ -209,10 +214,16 @@ public class WebInstanceController {
             WebInstance instance = webInstanceRepository.findById(id)
                     .orElseThrow(() -> new RuntimeException("WebInstance não encontrada"));
 
-            // Atualizar campos (apenas os que foram enviados)
+            // ⭐ VALIDAÇÃO: Se mudar status para ACTIVE, desativar todas as outras
             if (body.containsKey("status")) {
-                instance.setStatus((String) body.get("status"));
+                String newStatus = (String) body.get("status");
+                if ("ACTIVE".equalsIgnoreCase(newStatus) && !"ACTIVE".equalsIgnoreCase(instance.getStatus())) {
+                    log.info("Instância {} será ativada - desativando todas as outras", id);
+                    deactivateAllActiveInstances();
+                }
+                instance.setStatus(newStatus);
             }
+
             if (body.containsKey("clientToken")) {
                 instance.setClientToken((String) body.get("clientToken"));
             }
@@ -221,6 +232,12 @@ public class WebInstanceController {
             }
             if (body.containsKey("suaInstancia")) {
                 instance.setSuaInstancia((String) body.get("suaInstancia"));
+            }
+            if (body.containsKey("connectedPhone")) {
+                String connectedPhone = (String) body.get("connectedPhone");
+                if (connectedPhone != null && !connectedPhone.trim().isEmpty()) {
+                    instance.setConnectedPhone(connectedPhone);
+                }
             }
             if (body.containsKey("expiraEm")) {
                 String expiraEmStr = (String) body.get("expiraEm");
@@ -233,7 +250,7 @@ public class WebInstanceController {
 
             WebInstance updated = webInstanceRepository.save(instance);
 
-            log.info("WebInstance atualizada com sucesso: {}", id);
+            log.info("WebInstance atualizada com sucesso: {} | Novo status: {}", id, updated.getStatus());
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
@@ -248,10 +265,6 @@ public class WebInstanceController {
         }
     }
 
-    /**
-     * DELETE /api/dev/webinstances/{id}
-     * Deleta uma WebInstance (com confirmação)
-     */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> deleteInstance(
@@ -273,7 +286,6 @@ public class WebInstanceController {
             WebInstance instance = webInstanceRepository.findById(id)
                     .orElseThrow(() -> new RuntimeException("WebInstance não encontrada"));
 
-            // Verificar se há chats associados
             if (instance.getChats() != null && !instance.getChats().isEmpty()) {
                 log.warn("WebInstance {} possui {} chats associados", id, instance.getChats().size());
             }
@@ -294,10 +306,6 @@ public class WebInstanceController {
         }
     }
 
-    /**
-     * PATCH /api/dev/webinstances/{id}/status
-     * Atualiza apenas o status de uma WebInstance
-     */
     @PatchMapping("/{id}/status")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> updateStatus(
@@ -317,6 +325,12 @@ public class WebInstanceController {
             WebInstance instance = webInstanceRepository.findById(id)
                     .orElseThrow(() -> new RuntimeException("WebInstance não encontrada"));
 
+            // ⭐ VALIDAÇÃO: Se mudar status para ACTIVE, desativar todas as outras
+            if ("ACTIVE".equalsIgnoreCase(newStatus) && !"ACTIVE".equalsIgnoreCase(instance.getStatus())) {
+                log.info("Instância {} será ativada - desativando todas as outras", id);
+                deactivateAllActiveInstances();
+            }
+
             instance.setStatus(newStatus);
             WebInstance updated = webInstanceRepository.save(instance);
 
@@ -333,9 +347,6 @@ public class WebInstanceController {
         }
     }
 
-    /**
-     * Converte WebInstance para DTO
-     */
     private WebInstanceDTO convertToDTO(WebInstance instance) {
         return WebInstanceDTO.builder()
                 .id(instance.getId())
@@ -348,6 +359,7 @@ public class WebInstanceController {
                 .clientToken(instance.getClientToken())
                 .seuToken(instance.getSeuToken())
                 .suaInstancia(instance.getSuaInstancia())
+                .connectedPhone(instance.getConnectedPhone())
                 .totalChats(instance.getChats() != null ? instance.getChats().size() : 0)
                 .build();
     }

@@ -14,7 +14,6 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-
 @Entity
 @Table(name = "web_instances")
 public class WebInstance {
@@ -28,7 +27,7 @@ public class WebInstance {
     private User user;
 
     @Column(nullable = false)
-    private String status;  // Ex: ACTIVE, INACTIVE, PENDING...
+    private String status;  // Ex: ACTIVE, DEACTIVATED, INACTIVE, PENDING...
 
     @Column(name = "criado_em", nullable = false, updatable = false)
     private LocalDateTime criadoEm;
@@ -45,6 +44,10 @@ public class WebInstance {
     @Column(name = "sua_instancia", nullable = false)
     private String suaInstancia;
 
+    // ⭐ NOVO CAMPO: Telefone conectado à instância
+    @Column(name = "connected_phone", length = 20, nullable = false)
+    private String connectedPhone;
+
     // Relacionamento 1:N -> uma WebInstance pode ter vários Chats
     @OneToMany(mappedBy = "webInstance", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Chat> chats = new ArrayList<>();
@@ -52,5 +55,10 @@ public class WebInstance {
     @PrePersist
     public void prePersist() {
         this.criadoEm = LocalDateTime.now();
+
+        // ⭐ Se expiraEm não foi definido, aplicar 30 dias automaticamente
+        if (this.expiraEm == null) {
+            this.expiraEm = LocalDateTime.now().plusDays(30);
+        }
     }
 }
