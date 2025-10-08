@@ -2,12 +2,15 @@ package com.example.loginauthapi.services;
 
 import com.example.loginauthapi.dto.ChatInfoResponseDTO;
 import com.example.loginauthapi.dto.ChatsListResponseDTO;
+import com.example.loginauthapi.dto.TagDTO;
 import com.example.loginauthapi.dto.zapi.ZapiChatDetailResponseDTO;
 import com.example.loginauthapi.dto.zapi.ZapiChatItemDTO;
 import com.example.loginauthapi.entities.Chat;
+import com.example.loginauthapi.entities.Tag;
 import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.ChatRepository;
+import com.example.loginauthapi.repositories.TagRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.zapi.ZapiChatService;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +36,7 @@ public class ChatService {
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
     private final ZapiChatService zapiChatService;
+    private final TagRepository tagRepository; // ✅ ADICIONADO
 
     // NOVA ESTRUTURA: Armazenar progresso do carregamento por userId
     private final ConcurrentHashMap<String, LoadingProgress> loadingProgressMap = new ConcurrentHashMap<>();
@@ -259,13 +263,107 @@ public class ChatService {
         chatRepository.save(chat);
     }
 
+    // ============================================
+    // ✅ NOVOS MÉTODOS DE GERENCIAMENTO DE TAGS
+    // ============================================
+
+    /**
+     * Adicionar tags a um chat
+     */
     @Transactional
-    public void assignTicketToChat(String chatId, String ticketId) {
+    public void addTagsToChat(String chatId, List<String> tagIds, User user) {
         Chat chat = chatRepository.findById(chatId)
                 .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
-        chat.setTicket(ticketId);
+
+        // Verificar se o chat pertence à instância ativa do usuário
+        WebInstance activeInstance = getActiveWebInstance(user);
+        if (!chat.getWebInstance().getId().equals(activeInstance.getId())) {
+            throw new RuntimeException("Chat não pertence à sua instância ativa");
+        }
+
+        // Buscar e adicionar tags
+        for (String tagId : tagIds) {
+            Tag tag = tagRepository.findById(tagId)
+                    .orElseThrow(() -> new RuntimeException("Tag não encontrada: " + tagId));
+
+            // Verificar se a tag pertence ao usuário
+            if (!tag.getUser().getId().equals(user.getId())) {
+                throw new RuntimeException("Tag não pertence ao usuário");
+            }
+
+            chat.addTag(tag);
+        }
+
         chatRepository.save(chat);
+        log.info("Tags adicionadas ao chat {}: {}", chatId, tagIds);
     }
+
+    /**
+     * Remover tag de um chat
+     */
+    @Transactional
+    public void removeTagFromChat(String chatId, String tagId, User user) {
+        Chat chat = chatRepository.findById(chatId)
+                .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+
+        // Verificar se o chat pertence à instância ativa do usuário
+        WebInstance activeInstance = getActiveWebInstance(user);
+        if (!chat.getWebInstance().getId().equals(activeInstance.getId())) {
+            throw new RuntimeException("Chat não pertence à sua instância ativa");
+        }
+
+        Tag tag = tagRepository.findById(tagId)
+                .orElseThrow(() -> new RuntimeException("Tag não encontrada"));
+
+        // Verificar se a tag pertence ao usuário
+        if (!tag.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Tag não pertence ao usuário");
+        }
+
+        chat.removeTag(tag);
+        chatRepository.save(chat);
+        log.info("Tag {} removida do chat {}", tagId, chatId);
+    }
+
+    /**
+     * Substituir todas as tags de um chat
+     */
+    @Transactional
+    public void setTagsForChat(String chatId, List<String> tagIds, User user) {
+        Chat chat = chatRepository.findById(chatId)
+                .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+
+        // Verificar se o chat pertence à instância ativa do usuário
+        WebInstance activeInstance = getActiveWebInstance(user);
+        if (!chat.getWebInstance().getId().equals(activeInstance.getId())) {
+            throw new RuntimeException("Chat não pertence à sua instância ativa");
+        }
+
+        // Limpar tags atuais
+        chat.clearTags();
+
+        // Adicionar novas tags
+        if (tagIds != null && !tagIds.isEmpty()) {
+            for (String tagId : tagIds) {
+                Tag tag = tagRepository.findById(tagId)
+                        .orElseThrow(() -> new RuntimeException("Tag não encontrada: " + tagId));
+
+                // Verificar se a tag pertence ao usuário
+                if (!tag.getUser().getId().equals(user.getId())) {
+                    throw new RuntimeException("Tag não pertence ao usuário");
+                }
+
+                chat.addTag(tag);
+            }
+        }
+
+        chatRepository.save(chat);
+        log.info("Tags do chat {} atualizadas: {}", chatId, tagIds);
+    }
+
+    // ============================================
+    // MÉTODOS DE CONSTRUÇÃO DE RESPOSTAS
+    // ============================================
 
     private ChatsListResponseDTO buildSuccessResponse(List<Chat> chats) {
         List<ChatInfoResponseDTO> chatDtos = chats.stream()
@@ -305,7 +403,19 @@ public class ChatService {
                 .build();
     }
 
+    // ✅ MÉTODO MODIFICADO: Agora retorna lista de tags ao invés de ticket
     private ChatInfoResponseDTO convertToDto(Chat chat) {
+        // Converter tags para TagDTO
+        List<TagDTO> tagDtos = chat.getTags().stream()
+                .map(tag -> TagDTO.builder()
+                        .id(tag.getId())
+                        .name(tag.getName())
+                        .color(tag.getColor())
+                        .criadoEm(tag.getCriadoEm())
+                        .atualizadoEm(tag.getAtualizadoEm())
+                        .build())
+                .collect(Collectors.toList());
+
         return ChatInfoResponseDTO.builder()
                 .id(chat.getId())
                 .name(chat.getName())
@@ -315,7 +425,7 @@ public class ChatService {
                 .unread(chat.getUnread())
                 .profileThumbnail(chat.getProfileThumbnail())
                 .column(chat.getColumn())
-                .ticket(chat.getTicket())
+                .tags(tagDtos)  // ✅ MODIFICADO: retorna lista de tags
                 .build();
     }
 }

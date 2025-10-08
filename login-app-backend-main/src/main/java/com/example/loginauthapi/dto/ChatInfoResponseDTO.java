@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @Builder
@@ -20,6 +21,7 @@ public class ChatInfoResponseDTO {
     private Integer unread;
     private String profileThumbnail;
     private String column;
-    private String ticket;
-}
 
+    // ✅ MODIFICADO: Agora retorna lista de tags ao invés de um único ticket
+    private List<TagDTO> tags;
+}

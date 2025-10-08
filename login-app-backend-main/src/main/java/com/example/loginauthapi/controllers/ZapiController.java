@@ -11,6 +11,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -123,14 +124,6 @@ public class ZapiController {
     }
 
     /**
-     * Endpoint alternativo para buscar chats apenas do banco (sem sincronizar)
-     * GET /dashboard/zapi/chats
-     *
-     * Mais rápido, não faz requisições à Z-API
-     */
-
-
-    /**
      * Endpoint para verificar o progresso do carregamento de fotos
      * GET /dashboard/zapi/chats_loading_progress
      *
@@ -174,7 +167,12 @@ public class ZapiController {
         }
     }
 
-
+    /**
+     * Endpoint alternativo para buscar chats apenas do banco (sem sincronizar)
+     * GET /dashboard/zapi/chats
+     *
+     * Mais rápido, não faz requisições à Z-API
+     */
     @GetMapping("/chats")
     public ResponseEntity<ChatsListResponseDTO> getChats() {
         log.info("Requisição recebida para obter chats do banco");
@@ -232,40 +230,105 @@ public class ZapiController {
         }
     }
 
+    // ============================================
+    // ✅ NOVOS ENDPOINTS DE GERENCIAMENTO DE TAGS
+    // ============================================
+
     /**
-     * Endpoint para associar um ticket a um chat
-     * PUT /dashboard/zapi/chats/{chatId}/ticket
+     * Endpoint para adicionar tags a um chat
+     * POST /dashboard/zapi/chats/{chatId}/tags
      */
-    @PutMapping("/chats/{chatId}/ticket")
-    public ResponseEntity<Map<String, Object>> assignTicket(
+    @PostMapping("/chats/{chatId}/tags")
+    public ResponseEntity<Map<String, Object>> addTagsToChat(
             @PathVariable String chatId,
-            @RequestBody Map<String, String> body) {
+            @RequestBody Map<String, List<String>> body) {
 
         try {
-            String ticketId = body.get("ticketId");
+            User user = getAuthenticatedUser();
+            List<String> tagIds = body.get("tagIds");
 
-            if (ticketId == null || ticketId.trim().isEmpty()) {
+            if (tagIds == null || tagIds.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of(
                         "success", false,
-                        "message", "ID do ticket não informado"
+                        "message", "Lista de tags não informada"
                 ));
             }
 
-            chatService.assignTicketToChat(chatId, ticketId);
+            chatService.addTagsToChat(chatId, tagIds, user);
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
-                    "message", "Ticket associado com sucesso"
+                    "message", "Tags adicionadas com sucesso"
             ));
 
         } catch (Exception e) {
-            log.error("Erro ao associar ticket ao chat {}", chatId, e);
-            return ResponseEntity.internalServerError().body(Map.of(
+            log.error("Erro ao adicionar tags ao chat {}", chatId, e);
+            return ResponseEntity.badRequest().body(Map.of(
                     "success", false,
-                    "message", "Erro ao associar ticket: " + e.getMessage()
+                    "message", e.getMessage()
             ));
         }
     }
+
+    /**
+     * Endpoint para remover tag de um chat
+     * DELETE /dashboard/zapi/chats/{chatId}/tags/{tagId}
+     */
+    @DeleteMapping("/chats/{chatId}/tags/{tagId}")
+    public ResponseEntity<Map<String, Object>> removeTagFromChat(
+            @PathVariable String chatId,
+            @PathVariable String tagId) {
+
+        try {
+            User user = getAuthenticatedUser();
+            chatService.removeTagFromChat(chatId, tagId, user);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Tag removida com sucesso"
+            ));
+
+        } catch (Exception e) {
+            log.error("Erro ao remover tag {} do chat {}", tagId, chatId, e);
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * Endpoint para substituir todas as tags de um chat
+     * PUT /dashboard/zapi/chats/{chatId}/tags
+     */
+    @PutMapping("/chats/{chatId}/tags")
+    public ResponseEntity<Map<String, Object>> setTagsForChat(
+            @PathVariable String chatId,
+            @RequestBody Map<String, List<String>> body) {
+
+        try {
+            User user = getAuthenticatedUser();
+            List<String> tagIds = body.get("tagIds");
+
+            chatService.setTagsForChat(chatId, tagIds, user);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Tags atualizadas com sucesso"
+            ));
+
+        } catch (Exception e) {
+            log.error("Erro ao atualizar tags do chat {}", chatId, e);
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    // ============================================
+    // MÉTODO AUXILIAR
+    // ============================================
 
     /**
      * Método auxiliar para obter o usuário autenticado
