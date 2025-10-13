@@ -14,17 +14,17 @@ WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
 
 # Copia o certificado SSL (seu keystore)
-COPY src/main/resources/clinichub.p12 /app/clinichub.p12
+COPY src/main/resources/clinichub-cert.p12 /app/clinichub-cert.p12
 
 # Expõe a porta HTTPS
 EXPOSE 8443
 
 # Define as configs do Spring Boot para SSL
 ENV SERVER_PORT=8443
-ENV SERVER_SSL_KEY_STORE=/app/clinichub.p12
+ENV SERVER_SSL_KEY_STORE=/app/clinichub-cert.p12
 ENV SERVER_SSL_KEY_STORE_PASSWORD=ChangeMe123
 ENV SERVER_SSL_KEY_STORE_TYPE=PKCS12
-ENV SERVER_SSL_KEY_ALIAS=clinichub
+ENV SERVER_SSL_KEY_ALIAS=clinichub-cert
 
 # Sobe o app com as configs SSL
 ENTRYPOINT ["sh", "-c", "java -jar \
