@@ -22,8 +22,11 @@ public class SecurityConfig {
     @Autowired
     private CustomUserDetailsService userDetailsService;
 
+    /*
     @Autowired
     SecurityFilter securityFilter;
+
+     */
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -62,8 +65,8 @@ public class SecurityConfig {
                         // Qualquer outra requisição precisa de autenticação
                         .anyRequest()
                         .authenticated()
-                )
-                .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class);
+                );
+                //.addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
