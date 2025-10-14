@@ -29,6 +29,15 @@ public class SecurityFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+        String path = request.getServletPath();
+
+        // Pula a validação de token para endpoints públicos
+        if (isPublicEndpoint(path)) {
+            log.debug("Endpoint público detectado: {}", path);
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         var token = this.recoverToken(request);
 
         log.debug("URI: {}", request.getRequestURI());
@@ -57,6 +66,23 @@ public class SecurityFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Verifica se o endpoint é público e não requer autenticação
+     */
+    private boolean isPublicEndpoint(String path) {
+        return path.startsWith("/webhook/") ||
+                path.startsWith("/auth/login") ||
+                path.startsWith("/auth/register") ||
+                path.startsWith("/auth/confirm") ||
+                path.startsWith("/h2-console/") ||
+                path.startsWith("/webjars/") ||
+                path.startsWith("/css/") ||
+                path.startsWith("/js/") ||
+                path.startsWith("/images/") ||
+                path.startsWith("/static/") ||
+                path.equals("/favicon.ico");
     }
 
     private String recoverToken(HttpServletRequest request) {
