@@ -34,6 +34,7 @@ public class SecurityConfig {
                         .frameOptions(frame -> frame.sameOrigin())
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .requiresChannel(channel -> channel.anyRequest().requiresInsecure())
                 .authorizeHttpRequests(authorize -> authorize
                         // Endpoints públicos
                         .requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
@@ -58,7 +59,8 @@ public class SecurityConfig {
                         .requestMatchers("/dashboard/**").authenticated()
 
                         // Qualquer outra requisição precisa de autenticação
-                        .anyRequest().authenticated()
+                        .anyRequest()
+                        .authenticated()
                 )
                 .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
