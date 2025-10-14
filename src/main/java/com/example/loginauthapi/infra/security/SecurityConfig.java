@@ -41,7 +41,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/auth/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/confirm").permitAll()
                         .requestMatchers("/api/profile/**").authenticated()
-                        .requestMatchers(HttpMethod.POST,"/webhook/**").permitAll()
+                        .requestMatchers("/webhook/**").permitAll()
+                        .requestMatchers(HttpMethod.OPTIONS, "/webhook/**").permitAll()
 
                         // H2 Console e recursos estáticos
                         // Ver se para produção eu vou manter esses permitALL ai abaixo
