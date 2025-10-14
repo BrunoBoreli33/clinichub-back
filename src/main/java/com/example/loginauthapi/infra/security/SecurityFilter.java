@@ -28,25 +28,14 @@ public class SecurityFilter extends OncePerRequestFilter {
     UserRepository userRepository;
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getServletPath();
+        return path.startsWith("/webhook");
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
         String path = request.getServletPath();
-        log.info("Method: {}", request.getMethod());
-        log.info("URI: {}", request.getRequestURI());
-        log.info("Path: {}", request.getServletPath());
-
-        request.getHeaderNames().asIterator()
-                .forEachRemaining(name -> log.info("Header: {} = {}", name, request.getHeader(name)));
-
-        if (request.getCookies() != null) {
-            for (var cookie : request.getCookies()) {
-                log.info("Cookie: {} = {}", cookie.getName(), cookie.getValue());
-            }
-        }
-
-        if (path.startsWith("/webhook/")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
 
         // Pula a validação de token para endpoints públicos
         if (isPublicEndpoint(path)) {
