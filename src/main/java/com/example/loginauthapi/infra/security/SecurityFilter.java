@@ -1,5 +1,5 @@
 package com.example.loginauthapi.infra.security;
-/*
+
 import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.repositories.UserRepository;
 import jakarta.servlet.FilterChain;
@@ -76,7 +76,7 @@ public class SecurityFilter extends OncePerRequestFilter {
 
     /**
      * Verifica se o endpoint é público e não requer autenticação
-
+     */
     private boolean isPublicEndpoint(String path) {
         return path.startsWith("/webhook/") ||
                 path.startsWith("/auth/login") ||
@@ -100,5 +100,3 @@ public class SecurityFilter extends OncePerRequestFilter {
         return authHeader.replace("Bearer ", "");
     }
 }
-
-*/
