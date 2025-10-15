@@ -137,13 +137,7 @@ public class ChatService {
                         Chat chat = existingChat.orElse(new Chat());
                         chat.setWebInstance(instance);
                         chat.setPhone(zapiChat.getPhone());
-
-                        if (zapiChat.getName() != null && !zapiChat.getName().trim().isEmpty()) {
-                            chat.setName(zapiChat.getName());
-                        } else {
-                            chat.setName(zapiChat.getPhone());
-                        }
-
+                        chat.setName(zapiChat.getName());
                         chat.setIsGroup(zapiChat.getIsGroup() != null ? zapiChat.getIsGroup() : false);
 
                         try {
