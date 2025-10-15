@@ -19,7 +19,12 @@ import java.util.Set;
         @Index(name = "idx_web_instance_id", columnList = "web_instance_id"),
         @Index(name = "idx_phone", columnList = "phone"),
         @Index(name = "idx_last_message_time", columnList = "last_message_time")
-})
+},
+        uniqueConstraints = {
+                @UniqueConstraint(columnNames = {"web_instance_id", "phone"})
+        }
+
+)
 public class Chat {
 
     @Id
@@ -97,5 +102,6 @@ public class Chat {
     @Table(uniqueConstraints = {
             @UniqueConstraint(columnNames = {"web_instance_id", "phone"})
     })
-    public static class ChatUniqueConstraint {}
+    public static class ChatUniqueConstraint {
+    }
 }
