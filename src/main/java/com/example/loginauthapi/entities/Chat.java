@@ -30,7 +30,6 @@ public class Chat {
     @JoinColumn(name = "web_instance_id", nullable = false)
     private WebInstance webInstance;
 
-    @Column(nullable = false)
     private String name;
 
     @Column(nullable = false, unique = false) // phone não é globalmente único, apenas por instância
