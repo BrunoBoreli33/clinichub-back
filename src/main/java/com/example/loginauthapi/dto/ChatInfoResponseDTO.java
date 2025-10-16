@@ -17,6 +17,10 @@ public class ChatInfoResponseDTO {
     private String name;
     private String phone;
     private LocalDateTime lastMessageTime;
+
+    // ✅ NOVO: Conteúdo da última mensagem
+    private String lastMessageContent;
+
     private Boolean isGroup;
     private Integer unread;
     private String profileThumbnail;

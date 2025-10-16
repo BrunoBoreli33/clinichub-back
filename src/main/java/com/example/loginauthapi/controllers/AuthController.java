@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -135,4 +136,52 @@ public class AuthController {
         return ResponseEntity.ok(new TokenResponseDTO(newUser.getId(), newUser.getName(), token));
 
     }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshToken(@RequestBody RefreshTokenDTO body) {
+        try {
+            // Valida o token antigo
+            String email = tokenService.validateToken(body.token());
+
+            if (email == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of(
+                                "success", false,
+                                "message", "Token inválido ou expirado"
+                        ));
+            }
+
+            // Busca o usuário no banco
+            Optional<User> userOptional = repository.findByEmail(email);
+
+            if (userOptional.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of(
+                                "success", false,
+                                "message", "Usuário não encontrado"
+                        ));
+            }
+
+            User user = userOptional.get();
+
+            // Gera novo token
+            String newToken = tokenService.generateToken(user);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "token", newToken,
+                    "userId", user.getId(),
+                    "userName", user.getName(),
+                    "message", "Token renovado com sucesso"
+            ));
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of(
+                            "success", false,
+                            "message", "Erro ao renovar token: " + e.getMessage()
+                    ));
+        }
+    }
+
 }

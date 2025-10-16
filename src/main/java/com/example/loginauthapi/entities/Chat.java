@@ -37,25 +37,30 @@ public class Chat {
 
     private String name;
 
-    @Column(nullable = false, unique = false) // phone não é globalmente único, apenas por instância
+    @Column(nullable = false, unique = false)
     private String phone;
 
     @Column(name = "last_message_time")
     private LocalDateTime lastMessageTime;
 
+    // ✅ NOVO: Conteúdo da última mensagem enviada/recebida
+    @Column(name = "last_message_content", columnDefinition = "TEXT")
+    private String lastMessageContent;
+
     @Column(name = "is_group", nullable = false)
     private Boolean isGroup = false;
 
+    // ✅ IMPORTANTE: Campo exclusivo do sistema de notificações
+    // NUNCA deve ser sobrescrito com dados do Z-API
     @Column(nullable = false)
     private Integer unread = 0;
 
     @Column(name = "profile_thumbnail", columnDefinition = "TEXT")
-    private String profileThumbnail; // URL ou base64 da foto
+    private String profileThumbnail;
 
     @Column(name = "column_name")
-    private String column; // Coluna onde o chat está organizado (ex: "inbox", "archived", etc)
+    private String column;
 
-    // ✅ NOVO: Relacionamento ManyToMany com Tags
     @ManyToMany(fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     @JoinTable(
             name = "chat_tags",
@@ -81,7 +86,7 @@ public class Chat {
         this.atualizadoEm = LocalDateTime.now();
     }
 
-    // ✅ MÉTODOS AUXILIARES PARA GERENCIAR TAGS
+    // Métodos auxiliares para gerenciar tags
     public void addTag(Tag tag) {
         this.tags.add(tag);
         tag.getChats().add(this);
@@ -98,7 +103,6 @@ public class Chat {
         }
     }
 
-    // Constraint única composta: um phone por instância
     @Table(uniqueConstraints = {
             @UniqueConstraint(columnNames = {"web_instance_id", "phone"})
     })

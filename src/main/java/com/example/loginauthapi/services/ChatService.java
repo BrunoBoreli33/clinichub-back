@@ -6,10 +6,12 @@ import com.example.loginauthapi.dto.TagDTO;
 import com.example.loginauthapi.dto.zapi.ZapiChatDetailResponseDTO;
 import com.example.loginauthapi.dto.zapi.ZapiChatItemDTO;
 import com.example.loginauthapi.entities.Chat;
+import com.example.loginauthapi.entities.Message;
 import com.example.loginauthapi.entities.Tag;
 import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.ChatRepository;
+import com.example.loginauthapi.repositories.MessageRepository;
 import com.example.loginauthapi.repositories.TagRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.zapi.ZapiChatService;
@@ -36,12 +38,13 @@ public class ChatService {
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
     private final ZapiChatService zapiChatService;
-    private final TagRepository tagRepository; // ✅ ADICIONADO
+    private final TagRepository tagRepository;
+    private final MessageRepository messageRepository; // ✅ NOVO
 
-    // NOVA ESTRUTURA: Armazenar progresso do carregamento por userId
+    // Armazenar progresso do carregamento por userId
     private final ConcurrentHashMap<String, LoadingProgress> loadingProgressMap = new ConcurrentHashMap<>();
 
-    // NOVA CLASSE INTERNA: Para rastrear o progresso
+    // Classe interna: Para rastrear o progresso
     public static class LoadingProgress {
         private final AtomicInteger total;
         private final AtomicInteger loaded;
@@ -80,12 +83,80 @@ public class ChatService {
         }
     }
 
-    // MÉTODO NOVO: Obter progresso do carregamento
+    /**
+     * Obter progresso do carregamento
+     */
     public LoadingProgress getLoadingProgress(String userId) {
         return loadingProgressMap.get(userId);
     }
 
-    // MÉTODO MODIFICADO: Agora rastreia o progresso
+    /**
+     * ✅ NOVO: Sincronizar lastMessageContent de todos os chats
+     * Busca a última mensagem de cada chat e atualiza o campo lastMessageContent
+     */
+    @Transactional
+    public void syncLastMessageContent(String webInstanceId) {
+        log.info("🔄 Iniciando sincronização de lastMessageContent para instância {}", webInstanceId);
+
+        List<Chat> chats = chatRepository.findByWebInstanceId(webInstanceId);
+        int updated = 0;
+
+        for (Chat chat : chats) {
+            try {
+                Optional<Message> lastMessage = messageRepository.findTopByChatIdOrderByTimestampDesc(chat.getId());
+
+                if (lastMessage.isPresent()) {
+                    Message msg = lastMessage.get();
+                    String content;
+
+                    // Verificar tipo de mensagem
+                    if ("audio".equals(msg.getType())) {
+                        content = "🎤 Áudio";
+                    } else {
+                        content = msg.getContent();
+                    }
+
+                    // Truncar mensagem
+                    String truncated = truncateMessage(content, 50);
+
+                    // Atualizar apenas se diferente
+                    if (!truncated.equals(chat.getLastMessageContent())) {
+                        chat.setLastMessageContent(truncated);
+                        chatRepository.save(chat);
+                        updated++;
+                        log.debug("✅ Chat {} atualizado: '{}'", chat.getPhone(), truncated);
+                    }
+                } else {
+                    // Sem mensagens, garantir que está null ou "Sem mensagens"
+                    if (chat.getLastMessageContent() != null) {
+                        chat.setLastMessageContent(null);
+                        chatRepository.save(chat);
+                        updated++;
+                        log.debug("ℹ️ Chat {} sem mensagens", chat.getPhone());
+                    }
+                }
+            } catch (Exception e) {
+                log.error("❌ Erro ao sincronizar lastMessageContent do chat {}: {}",
+                        chat.getPhone(), e.getMessage());
+            }
+        }
+
+        log.info("✅ Sincronização concluída: {} chats atualizados de {} chats totais",
+                updated, chats.size());
+    }
+
+    /**
+     * Truncar mensagem para exibição
+     */
+    private String truncateMessage(String message, int maxLength) {
+        if (message == null) return "";
+        if (message.length() <= maxLength) return message;
+        return message.substring(0, maxLength) + "...";
+    }
+
+    /**
+     * ✅ MODIFICADO: Sincronizar chats com Z-API e lastMessageContent
+     */
     @Transactional
     public ChatsListResponseDTO syncAndGetChats(User user) {
         try {
@@ -97,16 +168,22 @@ public class ChatService {
                 return buildEmptyResponse();
             }
 
-            // NOVA LINHA: Inicializar progresso
+            // Inicializar progresso
             LoadingProgress progress = new LoadingProgress(zapiChats.size());
             loadingProgressMap.put(user.getId(), progress);
 
             List<Chat> syncedChats = syncChatsWithDatabase(activeInstance, zapiChats);
 
-            // MODIFICADO: Passar o progress para sincronização
+            // ✅ SINCRONIZAR lastMessageContent de todos os chats
+            syncLastMessageContent(activeInstance.getId());
+
+            // Passar o progress para sincronização de fotos
             syncProfileThumbnailsWithProgress(activeInstance, syncedChats, progress);
 
-            return buildSuccessResponse(syncedChats);
+            // Recarregar chats após sincronização
+            List<Chat> updatedChats = chatRepository.findByWebInstanceIdOrderByLastMessageTimeDesc(activeInstance.getId());
+
+            return buildSuccessResponse(updatedChats);
 
         } catch (Exception e) {
             log.error("Erro ao sincronizar chats para usuário {}: {}", user.getId(), e.getMessage(), e);
@@ -127,6 +204,10 @@ public class ChatService {
                 .orElseThrow(() -> new RuntimeException("Nenhuma instância ativa encontrada"));
     }
 
+    /**
+     * ✅ CORRIGIDO: NÃO sobrescrever unread, lastMessageTime e lastMessageContent
+     * Esses campos são exclusivos do sistema de notificações (WebhookService e MessageService)
+     */
     private List<Chat> syncChatsWithDatabase(WebInstance instance, List<ZapiChatItemDTO> zapiChats) {
         return zapiChats.stream()
                 .map(zapiChat -> {
@@ -140,26 +221,39 @@ public class ChatService {
                         chat.setName(zapiChat.getName());
                         chat.setIsGroup(zapiChat.getIsGroup() != null ? zapiChat.getIsGroup() : false);
 
-                        try {
-                            String unreadStr = zapiChat.getUnread();
-                            chat.setUnread(unreadStr != null && !unreadStr.isEmpty() ? Integer.parseInt(unreadStr) : 0);
-                        } catch (NumberFormatException e) {
-                            chat.setUnread(0);
-                        }
+                        // ✅ IMPORTANTE: NÃO SOBRESCREVER O CAMPO UNREAD!
+                        // O campo unread é exclusivo do sistema de notificações
+                        // e só deve ser modificado pelo WebhookService e MessageService
 
+                        // O campo lastMessageTime é atualizado pelo WebhookService e MessageService
+                        // Atualizar apenas se for um novo chat
                         try {
                             String timestampStr = zapiChat.getLastMessageTime();
                             if (timestampStr != null && !timestampStr.isEmpty() && !"0".equals(timestampStr)) {
                                 long timestamp = Long.parseLong(timestampStr);
-                                chat.setLastMessageTime(LocalDateTime.ofInstant(
-                                        Instant.ofEpochMilli(timestamp), ZoneId.systemDefault()));
-                            } else {
+                                LocalDateTime zapiTime = LocalDateTime.ofInstant(
+                                        Instant.ofEpochMilli(timestamp), ZoneId.systemDefault());
+
+                                // Apenas atualizar para novos chats
+                                if (chat.getId() == null) {
+                                    chat.setLastMessageTime(zapiTime);
+                                }
+                            } else if (chat.getId() == null) {
+                                // Novo chat sem timestamp
                                 chat.setLastMessageTime(null);
                             }
+                            // Se o chat já existe, manter o timestamp atual
                         } catch (NumberFormatException e) {
-                            chat.setLastMessageTime(null);
+                            if (chat.getId() == null) {
+                                chat.setLastMessageTime(null);
+                            }
                         }
 
+                        // ✅ IMPORTANTE: lastMessageContent não vem do Z-API
+                        // Manter valor existente ou deixar null para novos chats
+                        // O campo será atualizado pelo método syncLastMessageContent()
+
+                        // Definir coluna apenas para novos chats
                         if (chat.getId() == null) {
                             chat.setColumn("inbox");
                         }
@@ -175,7 +269,9 @@ public class ChatService {
                 .collect(Collectors.toList());
     }
 
-    // MÉTODO MODIFICADO: Agora atualiza o progresso
+    /**
+     * Sincronizar fotos de perfil com progresso
+     */
     private void syncProfileThumbnailsWithProgress(WebInstance instance, List<Chat> chats, LoadingProgress progress) {
         chats.forEach(chat -> {
             CompletableFuture.runAsync(() -> {
@@ -198,10 +294,10 @@ public class ChatService {
                 } catch (Exception e) {
                     log.warn("Erro ao buscar foto de perfil para {}: {}", chat.getPhone(), e.getMessage());
                 } finally {
-                    // NOVA LINHA: Incrementar progresso
+                    // Incrementar progresso
                     progress.incrementLoaded();
 
-                    // NOVA LINHA: Marcar como completo se todos foram carregados
+                    // Marcar como completo se todos foram carregados
                     if (progress.getLoaded() >= progress.getTotal()) {
                         progress.setCompleted(true);
                         log.info("Carregamento de fotos completo: {}/{}", progress.getLoaded(), progress.getTotal());
@@ -211,7 +307,9 @@ public class ChatService {
         });
     }
 
-    // MANTIDO: Método sem modificações para buscar do banco
+    /**
+     * Sincronizar fotos de perfil (sem progresso)
+     */
     private void syncProfileThumbnailsAsync(WebInstance instance, List<Chat> chats) {
         chats.forEach(chat -> {
             CompletableFuture.runAsync(() -> {
@@ -238,9 +336,16 @@ public class ChatService {
         });
     }
 
+    /**
+     * Buscar chats do banco de dados
+     */
     public ChatsListResponseDTO getChatsFromDatabase(User user) {
         try {
             WebInstance activeInstance = getActiveWebInstance(user);
+
+            // ✅ SINCRONIZAR lastMessageContent antes de retornar
+            syncLastMessageContent(activeInstance.getId());
+
             List<Chat> chats = chatRepository.findByWebInstanceIdOrderByLastMessageTimeDesc(activeInstance.getId());
             return buildSuccessResponse(chats);
         } catch (Exception e) {
@@ -249,6 +354,9 @@ public class ChatService {
         }
     }
 
+    /**
+     * Atualizar coluna do chat
+     */
     @Transactional
     public void updateChatColumn(String chatId, String column) {
         Chat chat = chatRepository.findById(chatId)
@@ -258,7 +366,7 @@ public class ChatService {
     }
 
     // ============================================
-    // ✅ NOVOS MÉTODOS DE GERENCIAMENTO DE TAGS
+    // MÉTODOS DE GERENCIAMENTO DE TAGS
     // ============================================
 
     /**
@@ -397,7 +505,9 @@ public class ChatService {
                 .build();
     }
 
-    // ✅ MÉTODO MODIFICADO: Agora retorna lista de tags ao invés de ticket
+    /**
+     * Converter Chat para ChatInfoResponseDTO com lista de tags
+     */
     private ChatInfoResponseDTO convertToDto(Chat chat) {
         // Converter tags para TagDTO
         List<TagDTO> tagDtos = chat.getTags().stream()
@@ -415,11 +525,12 @@ public class ChatService {
                 .name(chat.getName())
                 .phone(chat.getPhone())
                 .lastMessageTime(chat.getLastMessageTime())
+                .lastMessageContent(chat.getLastMessageContent()) // ✅ Incluído
                 .isGroup(chat.getIsGroup())
                 .unread(chat.getUnread())
                 .profileThumbnail(chat.getProfileThumbnail())
                 .column(chat.getColumn())
-                .tags(tagDtos)  // ✅ MODIFICADO: retorna lista de tags
+                .tags(tagDtos)
                 .build();
     }
 }

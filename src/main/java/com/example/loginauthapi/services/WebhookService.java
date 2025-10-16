@@ -9,6 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -20,26 +22,19 @@ public class WebhookService {
     private final MessageService messageService;
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
+    private final NotificationService notificationService;
 
     /**
-     * ✅ NOVO: Método unificado para processar QUALQUER mensagem
-     * Extrai as informações importantes e salva no banco
-     *
-     * Campos importantes do JSON:
-     * - fromMe: Boolean (true = enviada, false = recebida)
-     * - momment: Long (timestamp)
-     * - text.message: String (conteúdo)
-     * - connectedPhone: String (telefone da instância)
-     * - phone: String (telefone do contato)
-     * - instanceId: String
-     * - messageId: String
-     * - chatName: String
-     * - senderName: String
+     * ✅ MODIFICADO: Método unificado para processar QUALQUER mensagem
+     * - Reseta contador quando fromMe=true (mensagem enviada fora do sistema)
+     * - Incrementa contador quando fromMe=false (mensagem recebida)
+     * - Atualiza lastMessageContent SEMPRE
+     * - Emite notificações SSE SEMPRE (new-message para recebidas, chat-update para enviadas)
      */
     @Transactional
     public void processMessage(Map<String, Object> payload) {
         try {
-            log.info("🔄 Processando mensagem unificada");
+            log.info("📄 Processando mensagem unificada");
 
             // ===== EXTRAIR INFORMAÇÕES IMPORTANTES =====
             Boolean fromMe = (Boolean) payload.get("fromMe");
@@ -67,18 +62,16 @@ public class WebhookService {
                 return;
             }
 
-            log.info("📝 Mensagem extraída - FromMe: {}, Phone: {}, InstanceId: {}",
-                    fromMe, phone, instanceId);
+            log.info("🔍 Mensagem extraída - FromMe: {}, Phone: {}, InstanceId: {}, Content: {}",
+                    fromMe, phone, instanceId, content);
 
             // ===== BUSCAR INSTÂNCIA POR INSTANCE ID =====
             Optional<WebInstance> instanceOpt = Optional.empty();
 
-            // Tentar buscar por suaInstancia (que pode ser o instanceId)
             if (instanceId != null && !instanceId.trim().isEmpty()) {
                 instanceOpt = webInstanceRepository.findBySuaInstancia(instanceId);
             }
 
-            // Se não encontrou, tentar por connectedPhone como fallback
             if (instanceOpt.isEmpty() && connectedPhone != null) {
                 instanceOpt = webInstanceRepository.findByConnectedPhone(connectedPhone);
             }
@@ -96,35 +89,63 @@ public class WebhookService {
             // ===== BUSCAR OU CRIAR CHAT =====
             Optional<Chat> chatOpt = chatRepository.findByWebInstanceIdAndPhone(instance.getId(), phone);
             Chat chat;
+            boolean isNewChat = false;
 
             if (chatOpt.isEmpty()) {
-                // Criar novo chat se não existir
+                // ✅ CRIAR NOVO CHAT
                 chat = new Chat();
                 chat.setWebInstance(instance);
                 chat.setPhone(phone);
                 chat.setName(chatName != null ? chatName : phone);
                 chat.setIsGroup(isGroup != null ? isGroup : false);
-                chat.setUnread(fromMe ? 0 : 1); // Se recebida, incrementa unread
+                chat.setUnread(fromMe ? 0 : 1);
                 chat.setColumn("inbox");
+                chat.setProfileThumbnail(senderPhoto);
+
+                // ✅ NOVO: Definir lastMessageContent
+                chat.setLastMessageContent(truncateMessage(content, 50));
+
                 chat = chatRepository.save(chat);
+                isNewChat = true;
 
-                log.info("✅ Novo chat criado - ID: {}, Nome: {}, Phone: {}",
-                        chat.getId(), chat.getName(), chat.getPhone());
+                log.info("✅ Novo chat criado - ID: {}, Nome: {}, Phone: {}, Unread: {}, LastMessage: '{}'",
+                        chat.getId(), chat.getName(), chat.getPhone(), chat.getUnread(),
+                        chat.getLastMessageContent());
+
             } else {
+                // ✅ ATUALIZAR CHAT EXISTENTE
                 chat = chatOpt.get();
+                int previousUnread = chat.getUnread();
 
-                // Atualizar nome do chat se mudou
+                // Atualizar nome se mudou
                 if (chatName != null && !chatName.equals(chat.getName())) {
                     chat.setName(chatName);
                 }
 
-                // Se é mensagem recebida, incrementar contador de não lidas
-                if (!fromMe) {
+                // Atualizar foto de perfil se disponível
+                if (senderPhoto != null && !senderPhoto.isEmpty()) {
+                    chat.setProfileThumbnail(senderPhoto);
+                }
+
+                // ✅ ATUALIZAR lastMessageContent SEMPRE
+                chat.setLastMessageContent(truncateMessage(content, 50));
+
+                // ✅ LÓGICA DE CONTADOR baseada em fromMe
+                if (fromMe) {
+                    // Mensagem ENVIADA → ZERAR contador
+                    chat.setUnread(0);
+                    log.info("📤 Mensagem enviada detectada - Resetando contador (unread: {} → 0)",
+                            previousUnread);
+                } else {
+                    // Mensagem RECEBIDA → INCREMENTAR contador
                     chat.setUnread(chat.getUnread() + 1);
+                    log.info("📥 Mensagem recebida - Incrementando contador (unread: {} → {})",
+                            previousUnread, chat.getUnread());
                 }
 
                 chat = chatRepository.save(chat);
-                log.info("✅ Chat existente atualizado - ID: {}", chat.getId());
+                log.info("✅ Chat atualizado - ID: {}, Unread: {}, LastMessage: '{}'",
+                        chat.getId(), chat.getUnread(), chat.getLastMessageContent());
             }
 
             // ===== SALVAR MENSAGEM =====
@@ -142,18 +163,90 @@ public class WebhookService {
             );
 
             // ✅ ATUALIZAR lastMessageTime do chat
-            chat.setLastMessageTime(java.time.LocalDateTime.ofInstant(
+            chat.setLastMessageTime(LocalDateTime.ofInstant(
                     java.time.Instant.ofEpochMilli(momment),
                     java.time.ZoneId.systemDefault()
             ));
-            chatRepository.save(chat);
+            chat = chatRepository.save(chat);
 
-            log.info("✅ Mensagem processada com sucesso - MessageId: {}, Chat: {}",
-                    messageId, chat.getId());
+            log.info("✅ Mensagem processada com sucesso - MessageId: {}, Chat: {}, FromMe: {}",
+                    messageId, chat.getId(), fromMe);
+
+            // ===== ✅ ENVIAR NOTIFICAÇÃO SSE SEMPRE =====
+            if (!fromMe) {
+                // Mensagem RECEBIDA: Enviar notificação completa com som
+                sendNotificationToUser(instance.getUser().getId(), chat, content, isNewChat);
+            } else {
+                // Mensagem ENVIADA: Enviar atualização de chat (sem som)
+                sendChatUpdateToUser(instance.getUser().getId(), chat);
+            }
 
         } catch (Exception e) {
             log.error("❌ Erro ao processar mensagem", e);
             throw new RuntimeException("Erro ao processar webhook: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Truncar mensagem para exibição
+     */
+    private String truncateMessage(String message, int maxLength) {
+        if (message == null) return "";
+        if (message.length() <= maxLength) return message;
+        return message.substring(0, maxLength) + "...";
+    }
+
+    /**
+     * ✅ Enviar notificação SSE para mensagens RECEBIDAS (new-message)
+     */
+    private void sendNotificationToUser(String userId, Chat chat, String messageContent, boolean isNewChat) {
+        try {
+            Map<String, Object> notificationData = new HashMap<>();
+            notificationData.put("chatId", chat.getId());
+            notificationData.put("chatName", chat.getName());
+            notificationData.put("chatPhone", chat.getPhone());
+            notificationData.put("message", messageContent);
+            notificationData.put("lastMessageContent", chat.getLastMessageContent()); // ✅ NOVO
+            notificationData.put("unreadCount", chat.getUnread());
+            notificationData.put("isNewChat", isNewChat);
+            notificationData.put("profileThumbnail", chat.getProfileThumbnail());
+            notificationData.put("lastMessageTime", chat.getLastMessageTime() != null ?
+                    chat.getLastMessageTime().toString() : null);
+            notificationData.put("column", chat.getColumn());
+            notificationData.put("isGroup", chat.getIsGroup());
+
+            notificationService.sendNewMessageNotification(userId, notificationData);
+            log.info("📢 Notificação SSE enviada para usuário: {} (chat: {}, unread: {}, lastMessage: '{}')",
+                    userId, chat.getId(), chat.getUnread(), chat.getLastMessageContent());
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar notificação SSE", e);
+        }
+    }
+
+    /**
+     * ✅ Enviar atualização de chat para mensagens ENVIADAS (chat-update)
+     */
+    private void sendChatUpdateToUser(String userId, Chat chat) {
+        try {
+            Map<String, Object> chatData = new HashMap<>();
+            chatData.put("chatId", chat.getId());
+            chatData.put("chatName", chat.getName());
+            chatData.put("chatPhone", chat.getPhone());
+            chatData.put("lastMessageContent", chat.getLastMessageContent()); // ✅ NOVO
+            chatData.put("unreadCount", chat.getUnread());
+            chatData.put("profileThumbnail", chat.getProfileThumbnail());
+            chatData.put("lastMessageTime", chat.getLastMessageTime() != null ?
+                    chat.getLastMessageTime().toString() : null);
+            chatData.put("column", chat.getColumn());
+            chatData.put("isGroup", chat.getIsGroup());
+
+            notificationService.sendChatUpdateNotification(userId, chatData);
+            log.info("🔄 Atualização de chat enviada via SSE para usuário: {} (chat: {}, lastMessage: '{}')",
+                    userId, chat.getId(), chat.getLastMessageContent());
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar atualização de chat via SSE", e);
         }
     }
 

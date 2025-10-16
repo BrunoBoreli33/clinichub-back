@@ -17,6 +17,9 @@ public interface MessageRepository extends JpaRepository<Message, String> {
     // Buscar mensagens de um chat ordenadas por timestamp
     List<Message> findByChatIdOrderByTimestampAsc(String chatId);
 
+    // ✅ NOVO: Buscar a última mensagem de um chat
+    Optional<Message> findTopByChatIdOrderByTimestampDesc(String chatId);
+
     // Buscar mensagem pelo messageId do WhatsApp
     Optional<Message> findByMessageId(String messageId);
 
