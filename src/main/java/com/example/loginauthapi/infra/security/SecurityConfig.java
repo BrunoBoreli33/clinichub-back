@@ -44,6 +44,9 @@ public class SecurityConfig {
                         .requestMatchers("/webhook/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/webhook/**").permitAll()
 
+                        // ✅ NOVO: Endpoint SSE de notificações (autenticado)
+                        .requestMatchers("/api/notifications/stream").authenticated()
+
                         // H2 Console e recursos estáticos
                         // Ver se para produção eu vou manter esses permitALL ai abaixo
                         .requestMatchers(

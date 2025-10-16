@@ -68,7 +68,8 @@ public class MessageService {
     }
 
     /**
-     * ✅ NOVO: Salvar mensagem ANTES de enviar via Z-API (optimistic save)
+     * ✅ MODIFICADO: Salvar mensagem ANTES de enviar via Z-API (optimistic save)
+     * Agora atualiza lastMessageTime, zera unread E atualiza lastMessageContent
      */
     @Transactional
     public MessageDTO saveOutgoingMessage(String chatId, String content, User user) {
@@ -97,13 +98,22 @@ public class MessageService {
         message.setIsEdited(false);
 
         Message saved = messageRepository.save(message);
-        log.info("✅ Mensagem salva antes de enviar - TempId: {}, ChatId: {}", tempMessageId, chatId);
+
+        // ✅ ATUALIZAR: lastMessageTime, zerar unread E atualizar lastMessageContent
+        chat.setLastMessageTime(LocalDateTime.now());
+        chat.setUnread(0);
+        chat.setLastMessageContent(truncateMessage(content, 50)); // ✅ NOVO
+        chatRepository.save(chat);
+
+        log.info("✅ Mensagem salva antes de enviar - TempId: {}, LastMessage: '{}', Unread: 0",
+                tempMessageId, chat.getLastMessageContent());
 
         return convertToDTO(saved);
     }
 
     /**
-     * ✅ NOVO: Salvar mensagem de áudio ANTES de enviar
+     * ✅ MODIFICADO: Salvar mensagem de áudio ANTES de enviar
+     * Agora atualiza lastMessageTime, zera unread E atualiza lastMessageContent
      */
     @Transactional
     public MessageDTO saveOutgoingAudioMessage(String chatId, String audioBase64, Integer duration, User user) {
@@ -119,9 +129,9 @@ public class MessageService {
         Message message = new Message();
         message.setChat(chat);
         message.setMessageId(tempMessageId);
-        message.setContent("🎤 Áudio"); // Texto alternativo
+        message.setContent("🎤 Áudio");
         message.setType("audio");
-        message.setAudioUrl(audioBase64); // Salvar base64 temporariamente
+        message.setAudioUrl(audioBase64);
         message.setAudioDuration(duration);
         message.setFromMe(true);
         message.setTimestamp(LocalDateTime.now());
@@ -133,9 +143,26 @@ public class MessageService {
         message.setIsEdited(false);
 
         Message saved = messageRepository.save(message);
-        log.info("✅ Mensagem de áudio salva antes de enviar - TempId: {}", tempMessageId);
+
+        // ✅ ATUALIZAR: lastMessageTime, zerar unread E atualizar lastMessageContent
+        chat.setLastMessageTime(LocalDateTime.now());
+        chat.setUnread(0);
+        chat.setLastMessageContent("🎤 Áudio"); // ✅ NOVO
+        chatRepository.save(chat);
+
+        log.info("✅ Mensagem de áudio salva - TempId: {}, LastMessage: 'Áudio', Unread: 0",
+                tempMessageId);
 
         return convertToDTO(saved);
+    }
+
+    /**
+     * ✅ NOVO: Truncar mensagem para exibição
+     */
+    private String truncateMessage(String message, int maxLength) {
+        if (message == null) return "";
+        if (message.length() <= maxLength) return message;
+        return message.substring(0, maxLength) + "...";
     }
 
     /**

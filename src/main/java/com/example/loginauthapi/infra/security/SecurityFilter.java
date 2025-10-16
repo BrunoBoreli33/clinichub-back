@@ -91,12 +91,27 @@ public class SecurityFilter extends OncePerRequestFilter {
                 path.equals("/favicon.ico");
     }
 
+    // ✅ MODIFICADO: Aceita token via query parameter para endpoint SSE
     private String recoverToken(HttpServletRequest request) {
         var authHeader = request.getHeader("Authorization");
-        if (authHeader == null) {
-            log.debug("Header Authorization não encontrado");
-            return null;
+
+        // Primeiro tenta pegar do header (padrão)
+        if (authHeader != null) {
+            log.debug("Header Authorization encontrado");
+            return authHeader.replace("Bearer ", "");
         }
-        return authHeader.replace("Bearer ", "");
+
+        // ✅ NOVO: Para o endpoint SSE, aceita token via query parameter
+        String requestURI = request.getRequestURI();
+        if (requestURI != null && requestURI.contains("/api/notifications/stream")) {
+            String tokenParam = request.getParameter("token");
+            if (tokenParam != null && !tokenParam.isEmpty()) {
+                log.debug("Token recuperado via query parameter para SSE");
+                return tokenParam;
+            }
+        }
+
+        log.debug("Header Authorization não encontrado");
+        return null;
     }
 }

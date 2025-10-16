@@ -7,6 +7,7 @@ import com.example.loginauthapi.repositories.ChatRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -89,6 +90,52 @@ public class ChatController {
         } catch (Exception e) {
             log.error("Erro ao verificar atualizações: {}", e.getMessage());
             return ResponseEntity.ok(Map.of("hasNewMessages", false));
+        }
+    }
+
+    /**
+     * ✅ NOVO: PUT /dashboard/chats/{chatId}/mark-read
+     * Marca o chat como lido (zera contador de mensagens não lidas)
+     */
+    @PutMapping("/{chatId}/mark-read")
+    public ResponseEntity<Map<String, Object>> markChatAsRead(@PathVariable String chatId) {
+        try {
+            log.info("📖 Marcando chat {} como lido", chatId);
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            Chat chat = chatRepository.findById(chatId)
+                    .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+
+            // Verificar se o chat pertence ao usuário
+            if (!chat.getWebInstance().getId().equals(instance.getId())) {
+                log.warn("⚠️ Tentativa de acesso não autorizado ao chat {}", chatId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "success", false,
+                        "message", "Chat não pertence ao usuário"
+                ));
+            }
+
+            // ✅ Zerar contador de não lidas
+            int previousUnread = chat.getUnread();
+            chat.setUnread(0);
+            chatRepository.save(chat);
+
+            log.info("✅ Chat {} marcado como lido (unread: {} → 0)", chatId, previousUnread);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Chat marcado como lido",
+                    "previousUnread", previousUnread,
+                    "currentUnread", 0
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao marcar chat como lido: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao marcar chat como lido: " + e.getMessage()
+            ));
         }
     }
 }

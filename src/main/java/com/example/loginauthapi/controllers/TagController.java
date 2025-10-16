@@ -41,7 +41,7 @@ public class TagController {
     public ResponseEntity<Map<String, Object>> getAllTags() {
         try {
             User user = getAuthenticatedUser();
-            List<TagDTO> tags = tagService.getAllTagsByUser(user);
+            List<TagDTO> tags = tagService.getAllTags(user);
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
@@ -53,29 +53,6 @@ public class TagController {
             return ResponseEntity.internalServerError().body(Map.of(
                     "success", false,
                     "message", "Erro ao buscar etiquetas: " + e.getMessage()
-            ));
-        }
-    }
-
-    /**
-     * GET /dashboard/tags/{id} - Buscar tag específica
-     */
-    @GetMapping("/{id}")
-    public ResponseEntity<Map<String, Object>> getTagById(@PathVariable String id) {
-        try {
-            User user = getAuthenticatedUser();
-            TagDTO tag = tagService.getTagById(id, user);
-
-            return ResponseEntity.ok(Map.of(
-                    "success", true,
-                    "tag", tag
-            ));
-
-        } catch (Exception e) {
-            log.error("Erro ao buscar tag {}", id, e);
-            return ResponseEntity.badRequest().body(Map.of(
-                    "success", false,
-                    "message", e.getMessage()
             ));
         }
     }
