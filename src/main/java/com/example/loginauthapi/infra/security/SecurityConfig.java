@@ -43,6 +43,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/profile/**").authenticated()
                         .requestMatchers("/webhook/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/webhook/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/auth/refresh").permitAll()
 
                         // ✅ NOVO: Endpoint SSE de notificações (autenticado)
                         .requestMatchers("/api/notifications/stream").authenticated()
