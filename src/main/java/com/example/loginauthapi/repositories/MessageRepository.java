@@ -23,6 +23,18 @@ public interface MessageRepository extends JpaRepository<Message, String> {
     // Buscar mensagem pelo messageId do WhatsApp
     Optional<Message> findByMessageId(String messageId);
 
+    // NOVOS MÉTODOS para Rotinas Automáticas
+
+    /**
+     * Buscar última mensagem fromMe=true de um chat
+     */
+    Optional<Message> findFirstByChatIdAndFromMeTrueOrderByTimestampDesc(String chatId);
+
+    /**
+     * Buscar mensagens de um chat ordenadas por timestamp descendente
+     */
+    List<Message> findByChatIdOrderByTimestampDesc(String chatId);
+
     // Deletar mensagens antigas (mais de 60 dias)
     @Modifying
     @Query("DELETE FROM Message m WHERE m.timestamp < :cutoffDate")
