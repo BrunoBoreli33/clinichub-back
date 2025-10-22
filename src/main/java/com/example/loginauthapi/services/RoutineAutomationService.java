@@ -143,11 +143,11 @@ public class RoutineAutomationService {
         Message lastUserMessage = lastUserMessageOpt.get();
         LocalDateTime lastMessageTime = lastUserMessage.getTimestamp();
         LocalDateTime now = LocalDateTime.now();
-        long minutesSinceLastMessage = Duration.between(lastMessageTime, now).toMinutes();
+        long hoursSinceLastMessage = Duration.between(lastMessageTime, now).toHours();
 
-        // Se passou tempo suficiente (definido em hours_delay, mas usado como minutos no modo desenvolvimento)
+        // Se passou tempo suficiente (definido em hours_delay em HORAS)
         // então move o chat para repescagem e envia a primeira mensagem automática
-        if (minutesSinceLastMessage >= firstRoutine.getHoursDelay()) {
+        if (hoursSinceLastMessage >= firstRoutine.getHoursDelay()) {
             // Passa a lista completa de rotinas
             moveToRepescagemAndSendFirstMessage(chat, user, routines);
         }
@@ -307,13 +307,13 @@ public class RoutineAutomationService {
                     LocalDateTime now = LocalDateTime.now();
 
                     // Calcula quanto tempo passou desde a última mensagem automática
-                    long minutesSinceLastAutomated = Duration.between(
+                    long hoursSinceLastAutomated = Duration.between(
                             state.getLastAutomatedMessageSent(),
                             now
-                    ).toMinutes();
+                    ).toHours();
 
                     // Se passou tempo suficiente, move para Lead Frio (cliente não respondeu)
-                    if (minutesSinceLastAutomated >= lastRoutine.getHoursDelay()) {
+                    if (hoursSinceLastAutomated >= lastRoutine.getHoursDelay()) {
                         moveToLeadFrio(chat, state);
                     }
                 }
@@ -326,10 +326,10 @@ public class RoutineAutomationService {
             LocalDateTime now = LocalDateTime.now();
 
             // Calcula quanto tempo passou desde a última mensagem automática
-            long minutesSinceLastAutomated = Duration.between(
+            long hoursSinceLastAutomated = Duration.between(
                     state.getLastAutomatedMessageSent(),
                     now
-            ).toMinutes();
+            ).toHours();
 
             // Calcula qual seria a próxima rotina a ser enviada
             int nextSequence = state.getLastRoutineSent() + 1;
@@ -355,9 +355,9 @@ public class RoutineAutomationService {
                 return;
             }
 
-            // Se passou tempo suficiente (definido no hours_delay da próxima rotina)
+            // Se passou tempo suficiente (definido no hours_delay da próxima rotina em HORAS)
             // então envia a próxima mensagem
-            if (minutesSinceLastAutomated >= nextRoutine.getHoursDelay()) {
+            if (hoursSinceLastAutomated >= nextRoutine.getHoursDelay()) {
 
                 // Incrementa e salva o estado ANTES do envio do Z-API
                 state.setLastRoutineSent(nextSequence);
