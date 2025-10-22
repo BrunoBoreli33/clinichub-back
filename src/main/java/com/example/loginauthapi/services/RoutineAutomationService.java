@@ -34,8 +34,8 @@ public class RoutineAutomationService {
     private static final String REPESCAGEM_COLUMN = "followup"; // Coluna de acompanhamento automático
     private static final String LEAD_FRIO_COLUMN = "cold_lead"; // Coluna de leads frios (sem resposta)
 
-    // Método executado automaticamente a cada 60 segundos (1 minuto)
-    @Scheduled(fixedRate = 60000)
+    // Método executado automaticamente a cada 30 segundos
+    @Scheduled(fixedRate = 30000)
     public void processRoutineAutomation() {
         log.info("🤖 Iniciando processamento de rotinas automáticas");
 
@@ -78,8 +78,10 @@ public class RoutineAutomationService {
         }
 
         // ✅ PASSO 1: Primeiro processa chats que JÁ ESTÃO em repescagem
-        // Isso evita que chats recém-movidos sejam processados duas vezes no mesmo ciclo
-        List<Chat> repescagemChats = chatRepository.findByUserIdAndColumn(user.getId(), REPESCAGEM_COLUMN);
+        // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
+        List<Chat> repescagemChats = chatRepository.findByUserIdAndColumn(user.getId(), REPESCAGEM_COLUMN).stream()
+                .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
+                .toList();
 
         // Verifica cada chat em repescagem para enviar a próxima mensagem automática
         for (Chat chat : repescagemChats) {
@@ -87,11 +89,13 @@ public class RoutineAutomationService {
         }
 
         // ✅ PASSO 2: Depois busca chats que PRECISAM ENTRAR em repescagem
-        // Como isso é feito por último, esses chats não serão processados duas vezes
+        // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
         List<Chat> monitoredChats = chatRepository.findByUserIdAndColumnIn(
-                user.getId(),
-                Arrays.asList("hot_lead", "inbox")
-        );
+                        user.getId(),
+                        Arrays.asList("hot_lead", "inbox")
+                ).stream()
+                .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
+                .toList();
 
         // Verifica cada chat para ver se é hora de mover para repescagem
         for (Chat chat : monitoredChats) {
@@ -101,6 +105,31 @@ public class RoutineAutomationService {
 
     // Verifica se um chat deve ser movido para repescagem e envia a primeira mensagem
     private void checkAndMoveToRepescagem(Chat chat, User user, RoutineText firstRoutine, List<RoutineText> routines) {
+
+        // *************************************************************************
+        // CORREÇÃO: PRIMEIRA VERIFICAÇÃO DE ATIVIDADE DO CLIENTE (MANTÉM O CHAT FORA SE ATIVO)
+        // Usando a sintaxe CORRETA do seu MessageRepository: findTopByChatIdOrderByTimestampDesc
+        // *************************************************************************
+        Optional<Message> lastAnyMessageOpt = messageRepository
+                .findTopByChatIdOrderByTimestampDesc(chat.getId()); // <-- CORREÇÃO DA SINTAXE
+
+        if (lastAnyMessageOpt.isEmpty()) {
+            return; // Se não tem nenhuma mensagem, ignora
+        }
+
+        Message lastAnyMessage = lastAnyMessageOpt.get();
+
+        // Se a ÚLTIMA mensagem GERAL foi DO CLIENTE (fromMe=false), o chat está ativo. NÃO move para repescagem.
+        if (!lastAnyMessage.getFromMe()) {
+            return;
+        }
+        // *************************************************************************
+        // FIM DA CORREÇÃO DE ATIVIDADE
+        // *************************************************************************
+
+
+        // A PARTIR DAQUI, SABEMOS QUE A ÚLTIMA MENSAGEM FOI ENVIADA PELO USUÁRIO (fromMe=true)
+
         // Busca a última mensagem enviada PELO USUÁRIO (fromMe=true) neste chat
         Optional<Message> lastUserMessageOpt = messageRepository
                 .findFirstByChatIdAndFromMeTrueOrderByTimestampDesc(chat.getId());
@@ -139,17 +168,41 @@ public class RoutineAutomationService {
                     .filter(r -> r.getSequenceNumber() == nextSequence)
                     .findFirst();
 
-            // Se não existe a próxima rotina configurada (ex: se lastRoutineSent=7 e tentou entrar repescagem)
+            // ✅ TRATAMENTO: Se não existe a próxima rotina configurada, move para Lead Frio
             if (routineToSendOpt.isEmpty()) {
-                log.warn("⚠️ [CHAT: {}] Não há rotina #{} configurada para enviar ao entrar em repescagem", chat.getId(), nextSequence);
+                log.warn("⚠️ [CHAT: {}] Não há rotina #{} configurada. Movendo para Lead Frio.", chat.getId(), nextSequence);
+
+                // Configura o estado mínimo necessário
+                state.setChat(chat);
+                state.setUser(user);
+                state.setInRepescagem(false);
+                chatRoutineStateRepository.save(state);
+
+                // Move direto para Lead Frio
+                moveToLeadFrio(chat, state);
                 return;
             }
 
             RoutineText routineToSend = routineToSendOpt.get();
 
+            // ✅ TRATAMENTO: Se o textContent da rotina está vazio/null, move para Lead Frio
+            if (routineToSend.getTextContent() == null || routineToSend.getTextContent().trim().isEmpty()) {
+                log.warn("⚠️ [CHAT: {}] Rotina #{} com textContent vazio. Movendo para Lead Frio.", chat.getId(), nextSequence);
+
+                // Configura o estado mínimo necessário
+                state.setChat(chat);
+                state.setUser(user);
+                state.setInRepescagem(false);
+                chatRoutineStateRepository.save(state);
+
+                // Move direto para Lead Frio
+                moveToLeadFrio(chat, state);
+                return;
+            }
+
             // Guarda qual era a coluna anterior do chat
             String previousColumn = chat.getColumn();
-
+            state.setInRepescagem(true);
             // Move o chat para a coluna de repescagem
             chat.setColumn(REPESCAGEM_COLUMN);
             chatRepository.save(chat);
@@ -159,7 +212,7 @@ public class RoutineAutomationService {
             state.setUser(user);
             state.setPreviousColumn(previousColumn); // Guarda de onde veio
 
-            // **ATUALIZAÇÃO DO CONTADOR SEM DEPENDER DO Z-API**
+            // ATUALIZAÇÃO DO CONTADOR SEM DEPENDER DO Z-API
             state.setLastRoutineSent(nextSequence); // Define a rotina que será enviada
             state.setInRepescagem(true); // Marca que está em repescagem
 
@@ -169,8 +222,8 @@ public class RoutineAutomationService {
             lastUserMessageOpt.ifPresent(msg -> state.setLastUserMessageTime(msg.getTimestamp()));
 
             // Salva o estado no banco de dados, garantindo o incremento de lastRoutineSent
+            // O lastAutomatedMessageSent será atualizado após a tentativa de envio
             chatRoutineStateRepository.save(state);
-            // **FIM DA CORREÇÃO**
 
             // Busca a instância ativa do WhatsApp do usuário para enviar mensagens
             Optional<WebInstance> webInstanceOpt = webInstanceRepository.findByUserId(user.getId()).stream()
@@ -192,16 +245,18 @@ public class RoutineAutomationService {
                     routineToSend.getTextContent()
             );
 
+            // ATUALIZAÇÃO DO TEMPO DE ENVIO APÓS A TENTATIVA DO Z-API
+            state.setLastAutomatedMessageSent(LocalDateTime.now());
+            chatRoutineStateRepository.save(state);
+            // FIM DA CORREÇÃO
+
             // Verifica se a mensagem foi enviada com sucesso
             boolean sent = result != null && Boolean.TRUE.equals(result.get("success"));
 
             if (sent) {
-                // SÓ ATUALIZA O HORÁRIO DE ENVIO E SALVA O ESTADO EM CASO DE SUCESSO DO Z-API
-                state.setLastAutomatedMessageSent(LocalDateTime.now());
-                chatRoutineStateRepository.save(state);
                 log.info("✅ [CHAT: {}] Rotina #{} enviada ao entrar em repescagem", chat.getId(), nextSequence);
             } else {
-                log.error("❌ [CHAT: {}] Falha ao enviar rotina #{} ao entrar em repescagem. Contador já atualizado.", chat.getId(), nextSequence);
+                log.error("❌ [CHAT: {}] Falha ao enviar rotina #{} ao entrar em repescagem. Contador e tempo atualizados.", chat.getId(), nextSequence);
             }
 
         } catch (Exception e) {
@@ -221,7 +276,7 @@ public class RoutineAutomationService {
         }
 
         ChatRoutineState state = stateOpt.get();
-
+        state.setInRepescagem(true);
         // Busca todas as mensagens do chat, mais recentes primeiro
         List<Message> messages = messageRepository.findByChatIdOrderByTimestampDesc(chat.getId());
 
@@ -284,21 +339,29 @@ public class RoutineAutomationService {
                     .filter(r -> r.getSequenceNumber() == nextSequence)
                     .findFirst();
 
-            // Se não existe a próxima rotina configurada, não faz nada
+            // ✅ TRATAMENTO: Se não existe a próxima rotina configurada, move para Lead Frio
             if (nextRoutineOpt.isEmpty()) {
+                log.warn("⚠️ [CHAT: {}] Não há rotina #{} configurada. Movendo para Lead Frio.", chat.getId(), nextSequence);
+                moveToLeadFrio(chat, state);
                 return;
             }
 
             RoutineText nextRoutine = nextRoutineOpt.get();
 
+            // ✅ TRATAMENTO: Se o textContent está vazio/null, move para Lead Frio
+            if (nextRoutine.getTextContent() == null || nextRoutine.getTextContent().trim().isEmpty()) {
+                log.warn("⚠️ [CHAT: {}] Rotina #{} com textContent vazio. Movendo para Lead Frio.", chat.getId(), nextSequence);
+                moveToLeadFrio(chat, state);
+                return;
+            }
+
             // Se passou tempo suficiente (definido no hours_delay da próxima rotina)
             // então envia a próxima mensagem
             if (minutesSinceLastAutomated >= nextRoutine.getHoursDelay()) {
 
-                // **CORREÇÃO: Incrementa e salva o estado ANTES do envio do Z-API**
+                // Incrementa e salva o estado ANTES do envio do Z-API
                 state.setLastRoutineSent(nextSequence);
                 chatRoutineStateRepository.save(state);
-                // **FIM DA CORREÇÃO**
 
                 sendNextRoutineMessage(chat, user, state, nextRoutine);
             }
@@ -321,6 +384,8 @@ public class RoutineAutomationService {
 
             WebInstance webInstance = webInstanceOpt.get();
 
+            state.setInRepescagem(true);
+
             // Envia a mensagem via Z-API (WhatsApp)
             Map<String, Object> result = zapiMessageService.sendTextMessage(
                     webInstance,
@@ -328,20 +393,20 @@ public class RoutineAutomationService {
                     routine.getTextContent()
             );
 
+            // ATUALIZAÇÃO DO TEMPO DE ENVIO APÓS A TENTATIVA DO Z-API
+            // lastRoutineSent já foi atualizado em checkAndSendNextRoutineMessage
+            state.setLastAutomatedMessageSent(LocalDateTime.now());
+            chatRoutineStateRepository.save(state);
+            // FIM DA CORREÇÃO
+
             // Verifica se foi enviada com sucesso
             boolean sent = result != null && Boolean.TRUE.equals(result.get("success"));
 
             if (sent) {
-                // Atualiza o estado: marca SÓ o horário, pois o lastRoutineSent já foi atualizado em checkAndSendNextRoutineMessage
-                // **REMOVIDA A LINHA: state.setLastRoutineSent(routine.getSequenceNumber());**
-                state.setLastAutomatedMessageSent(LocalDateTime.now());
-                chatRoutineStateRepository.save(state);
-
                 log.info("✅ [CHAT: {}] Rotina #{} enviada", chat.getId(), routine.getSequenceNumber());
             } else {
-                // O log de erro acontece, mas o lastRoutineSent já foi atualizado, garantindo a progressão.
-                // Como lastAutomatedMessageSent não foi atualizado, o próximo ciclo tentará esta rotina novamente.
-                log.error("❌ [CHAT: {}] Falha ao enviar rotina #{}. Contador já atualizado.", chat.getId(), routine.getSequenceNumber());
+                // O log de erro acontece. O contador e o tempo de envio foram atualizados.
+                log.error("❌ [CHAT: {}] Falha ao enviar rotina #{}. Contador e tempo atualizados.", chat.getId(), routine.getSequenceNumber());
             }
 
         } catch (Exception e) {
@@ -356,7 +421,7 @@ public class RoutineAutomationService {
             chat.setColumn(LEAD_FRIO_COLUMN);
             chatRepository.save(chat);
 
-            log.info("✅ [CHAT: {}] Movido para Lead Frio", chat.getId());
+            log.info("❄️ [CHAT: {}] Movido para Lead Frio", chat.getId());
 
             // Marca que não está mais em repescagem
             state.setInRepescagem(false);
@@ -372,6 +437,13 @@ public class RoutineAutomationService {
         try {
             // Retorna o chat para a coluna onde ele estava antes da repescagem
             String previousColumn = state.getPreviousColumn();
+
+            // ✅ VALIDAÇÃO: Se previousColumn for null ou vazio, usar coluna padrão
+            if (previousColumn == null || previousColumn.isEmpty()) {
+                previousColumn = "inbox"; // Coluna padrão
+                log.warn("⚠️ [CHAT: {}] previousColumn estava null/vazio, usando 'inbox' como padrão", chat.getId());
+            }
+
             chat.setColumn(previousColumn);
             chatRepository.save(chat);
 
@@ -388,17 +460,38 @@ public class RoutineAutomationService {
     }
 
     // Método público para resetar manualmente o estado de rotina de um chat
-    // Útil para quando se quer reiniciar o processo de repescagem do zero
+    // ✅ MELHORADO: Agora remove da Repescagem se o chat estiver lá
     @Transactional
     public void resetChatRoutineState(String chatId) {
-        // Busca o estado e reseta todos os valores
-        chatRoutineStateRepository.findByChatId(chatId).ifPresent(state -> {
-            state.setLastRoutineSent(0); // Volta para 0 (nenhuma rotina enviada)
-            state.setLastAutomatedMessageSent(null); // Remove o horário da última mensagem
-            state.setInRepescagem(false); // Marca que não está em repescagem
-            chatRoutineStateRepository.save(state);
+        try {
+            // Busca o chat
+            Optional<Chat> chatOpt = chatRepository.findById(chatId);
+            if (chatOpt.isEmpty()) {
+                log.warn("⚠️ [CHAT: {}] Chat não encontrado ao resetar rotina", chatId);
+                return;
+            }
 
-            log.info("✅ [CHAT: {}] Estado de rotina resetado", chatId);
-        });
+            Chat chat = chatOpt.get();
+            boolean wasInRepescagem = REPESCAGEM_COLUMN.equals(chat.getColumn());
+
+            // Busca o estado e reseta todos os valores
+            chatRoutineStateRepository.findByChatId(chatId).ifPresent(state -> {
+                state.setLastRoutineSent(0); // Volta para 0 (nenhuma rotina enviada)
+                state.setLastAutomatedMessageSent(null); // Remove o horário da última mensagem
+                state.setInRepescagem(false); // Marca que não está em repescagem
+                chatRoutineStateRepository.save(state);
+
+                log.info("✅ [CHAT: {}] Estado de rotina resetado", chatId);
+
+                // ✅ NOVA LÓGICA: Se estava em Repescagem, remove da coluna
+                if (wasInRepescagem) {
+                    log.info("🔄 [CHAT: {}] Chat estava em Repescagem, removendo da coluna...", chatId);
+                    removeFromRepescagem(chat, state);
+                }
+            });
+
+        } catch (Exception e) {
+            log.error("❌ [CHAT: {}] Erro ao resetar estado de rotina", chatId, e);
+        }
     }
 }
