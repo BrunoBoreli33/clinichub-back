@@ -214,6 +214,14 @@ public class ZapiController {
                 ));
             }
 
+            // ✅ NOVA VALIDAÇÃO: Bloquear movimentação manual para Repescagem
+            if ("Repescagem".equalsIgnoreCase(column)) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "A coluna 'Repescagem' é exclusiva para o sistema de rotinas automáticas. Não é permitido mover conversas manualmente para esta coluna."
+                ));
+            }
+
             chatService.updateChatColumn(chatId, column);
 
             return ResponseEntity.ok(Map.of(

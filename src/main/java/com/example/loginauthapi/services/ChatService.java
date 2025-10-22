@@ -39,7 +39,7 @@ public class ChatService {
     private final WebInstanceRepository webInstanceRepository;
     private final ZapiChatService zapiChatService;
     private final TagRepository tagRepository;
-    private final MessageRepository messageRepository; // ✅ NOVO
+    private final MessageRepository messageRepository;
 
     // Armazenar progresso do carregamento por userId
     private final ConcurrentHashMap<String, LoadingProgress> loadingProgressMap = new ConcurrentHashMap<>();
@@ -91,14 +91,15 @@ public class ChatService {
     }
 
     /**
-     * ✅ NOVO: Sincronizar lastMessageContent de todos os chats
-     * Busca a última mensagem de cada chat e atualiza o campo lastMessageContent
+     * ✅ MODIFICADO: Sincronizar lastMessageContent apenas de chats ATIVOS
+     * Busca a última mensagem de cada chat ativo e atualiza o campo lastMessageContent
      */
     @Transactional
     public void syncLastMessageContent(String webInstanceId) {
         log.info("🔄 Iniciando sincronização de lastMessageContent para instância {}", webInstanceId);
 
-        List<Chat> chats = chatRepository.findByWebInstanceId(webInstanceId);
+        // ✅ BUSCAR APENAS CHATS ATIVOS
+        List<Chat> chats = chatRepository.findByWebInstanceIdAndActiveInZapiTrueOrderByLastMessageTimeDesc(webInstanceId);
         int updated = 0;
 
         for (Chat chat : chats) {
@@ -127,7 +128,7 @@ public class ChatService {
                         log.debug("✅ Chat {} atualizado: '{}'", chat.getPhone(), truncated);
                     }
                 } else {
-                    // Sem mensagens, garantir que está null ou "Sem mensagens"
+                    // Sem mensagens, garantir que está null
                     if (chat.getLastMessageContent() != null) {
                         chat.setLastMessageContent(null);
                         chatRepository.save(chat);
@@ -141,7 +142,7 @@ public class ChatService {
             }
         }
 
-        log.info("✅ Sincronização concluída: {} chats atualizados de {} chats totais",
+        log.info("✅ Sincronização concluída: {} chats ativos atualizados de {} chats totais",
                 updated, chats.size());
     }
 
@@ -155,38 +156,54 @@ public class ChatService {
     }
 
     /**
-     * ✅ MODIFICADO: Sincronizar chats com Z-API e lastMessageContent
+     * ✅ MODIFICADO: Sincronizar chats com Z-API e controlar active_in_zapi
+     * Este é o método principal que implementa a funcionalidade solicitada
      */
     @Transactional
     public ChatsListResponseDTO syncAndGetChats(User user) {
         try {
             WebInstance activeInstance = getActiveWebInstance(user);
+
+            // ✅ PASSO 1: DESATIVAR TODOS OS CHATS DA INSTÂNCIA
+            log.info("🔄 Desativando todos os chats da instância {} antes de sincronizar", activeInstance.getId());
+            chatRepository.deactivateAllChatsByWebInstanceId(activeInstance.getId());
+            log.info("✅ Todos os chats desativados (active_in_zapi = false)");
+
+            // ✅ PASSO 2: BUSCAR CHATS DO Z-API
+            log.info("📡 Buscando chats da Z-API para instância {}", activeInstance.getSuaInstancia());
             List<ZapiChatItemDTO> zapiChats = zapiChatService.getChats(activeInstance);
 
             if (zapiChats.isEmpty()) {
-                log.warn("Nenhum chat encontrado na Z-API para usuário {}", user.getId());
+                log.warn("⚠️ Nenhum chat encontrado na Z-API para usuário {}", user.getId());
                 return buildEmptyResponse();
             }
+
+            log.info("✅ {} chats recebidos do Z-API", zapiChats.size());
 
             // Inicializar progresso
             LoadingProgress progress = new LoadingProgress(zapiChats.size());
             loadingProgressMap.put(user.getId(), progress);
 
+            // ✅ PASSO 3: SINCRONIZAR E ATIVAR APENAS CHATS DO Z-API
+            log.info("🔄 Sincronizando {} chats do Z-API com o banco de dados", zapiChats.size());
             List<Chat> syncedChats = syncChatsWithDatabase(activeInstance, zapiChats);
+            log.info("✅ {} chats sincronizados e marcados como ativos", syncedChats.size());
 
-            // ✅ SINCRONIZAR lastMessageContent de todos os chats
+            // ✅ PASSO 4: SINCRONIZAR lastMessageContent de todos os chats ATIVOS
             syncLastMessageContent(activeInstance.getId());
 
             // Passar o progress para sincronização de fotos
             syncProfileThumbnailsWithProgress(activeInstance, syncedChats, progress);
 
-            // Recarregar chats após sincronização
-            List<Chat> updatedChats = chatRepository.findByWebInstanceIdOrderByLastMessageTimeDesc(activeInstance.getId());
+            // ✅ PASSO 5: RECARREGAR APENAS CHATS ATIVOS
+            log.info("📊 Carregando chats ativos da instância {}", activeInstance.getId());
+            List<Chat> updatedChats = chatRepository.findByWebInstanceIdAndActiveInZapiTrueOrderByLastMessageTimeDesc(activeInstance.getId());
+            log.info("✅ {} chats ativos carregados para exibição", updatedChats.size());
 
             return buildSuccessResponse(updatedChats);
 
         } catch (Exception e) {
-            log.error("Erro ao sincronizar chats para usuário {}: {}", user.getId(), e.getMessage(), e);
+            log.error("❌ Erro ao sincronizar chats para usuário {}: {}", user.getId(), e.getMessage(), e);
             return buildErrorResponse(e.getMessage());
         }
     }
@@ -205,8 +222,9 @@ public class ChatService {
     }
 
     /**
-     * ✅ CORRIGIDO: NÃO sobrescrever unread, lastMessageTime e lastMessageContent
-     * Esses campos são exclusivos do sistema de notificações (WebhookService e MessageService)
+     * ✅ MODIFICADO: Marcar chats como ATIVOS (active_in_zapi = true) ao sincronizar
+     * Chats recebidos do Z-API são marcados como ativos
+     * Chats existentes são reativados se estavam inativos
      */
     private List<Chat> syncChatsWithDatabase(WebInstance instance, List<ZapiChatItemDTO> zapiChats) {
         return zapiChats.stream()
@@ -220,6 +238,15 @@ public class ChatService {
                         chat.setPhone(zapiChat.getPhone());
                         chat.setName(zapiChat.getName());
                         chat.setIsGroup(zapiChat.getIsGroup() != null ? zapiChat.getIsGroup() : false);
+
+                        // ✅ MARCAR COMO ATIVO NO Z-API (FUNCIONALIDADE PRINCIPAL)
+                        chat.setActiveInZapi(true);
+
+                        if (existingChat.isPresent()) {
+                            log.debug("♻️ Reativando chat existente: {}", zapiChat.getPhone());
+                        } else {
+                            log.debug("✨ Criando novo chat ativo: {}", zapiChat.getPhone());
+                        }
 
                         // ✅ IMPORTANTE: NÃO SOBRESCREVER O CAMPO UNREAD!
                         // O campo unread é exclusivo do sistema de notificações
@@ -261,7 +288,7 @@ public class ChatService {
                         return chatRepository.save(chat);
 
                     } catch (Exception e) {
-                        log.error("Erro ao sincronizar chat {}: {}", zapiChat.getPhone(), e.getMessage());
+                        log.error("❌ Erro ao sincronizar chat {}: {}", zapiChat.getPhone(), e.getMessage());
                         return null;
                     }
                 })
@@ -276,23 +303,23 @@ public class ChatService {
         chats.forEach(chat -> {
             CompletableFuture.runAsync(() -> {
                 try {
-                    log.debug("Buscando foto de perfil para: {}", chat.getPhone());
+                    log.debug("🖼️ Buscando foto de perfil para: {}", chat.getPhone());
                     ZapiChatDetailResponseDTO detail = zapiChatService.getChatDetail(instance, chat.getPhone());
 
                     if (detail != null) {
                         if (detail.getProfileThumbnail() != null && !detail.getProfileThumbnail().isEmpty()) {
                             chat.setProfileThumbnail(detail.getProfileThumbnail());
                             chatRepository.save(chat);
-                            log.debug("Foto de perfil atualizada para {}: {}",
+                            log.debug("✅ Foto de perfil atualizada para {}: {}",
                                     chat.getPhone(), detail.getProfileThumbnail());
                         } else {
-                            log.debug("profileThumbnail vazio para: {}", chat.getPhone());
+                            log.debug("ℹ️ profileThumbnail vazio para: {}", chat.getPhone());
                         }
                     } else {
-                        log.debug("Detalhes do chat null para: {}", chat.getPhone());
+                        log.debug("⚠️ Detalhes do chat null para: {}", chat.getPhone());
                     }
                 } catch (Exception e) {
-                    log.warn("Erro ao buscar foto de perfil para {}: {}", chat.getPhone(), e.getMessage());
+                    log.warn("⚠️ Erro ao buscar foto de perfil para {}: {}", chat.getPhone(), e.getMessage());
                 } finally {
                     // Incrementar progresso
                     progress.incrementLoaded();
@@ -300,7 +327,7 @@ public class ChatService {
                     // Marcar como completo se todos foram carregados
                     if (progress.getLoaded() >= progress.getTotal()) {
                         progress.setCompleted(true);
-                        log.info("Carregamento de fotos completo: {}/{}", progress.getLoaded(), progress.getTotal());
+                        log.info("✅ Carregamento de fotos completo: {}/{}", progress.getLoaded(), progress.getTotal());
                     }
                 }
             });
@@ -308,36 +335,7 @@ public class ChatService {
     }
 
     /**
-     * Sincronizar fotos de perfil (sem progresso)
-     */
-    private void syncProfileThumbnailsAsync(WebInstance instance, List<Chat> chats) {
-        chats.forEach(chat -> {
-            CompletableFuture.runAsync(() -> {
-                try {
-                    log.debug("Buscando foto de perfil para: {}", chat.getPhone());
-                    ZapiChatDetailResponseDTO detail = zapiChatService.getChatDetail(instance, chat.getPhone());
-
-                    if (detail != null) {
-                        if (detail.getProfileThumbnail() != null && !detail.getProfileThumbnail().isEmpty()) {
-                            chat.setProfileThumbnail(detail.getProfileThumbnail());
-                            chatRepository.save(chat);
-                            log.debug("Foto de perfil atualizada para {}: {}",
-                                    chat.getPhone(), detail.getProfileThumbnail());
-                        } else {
-                            log.debug("profileThumbnail vazio para: {}", chat.getPhone());
-                        }
-                    } else {
-                        log.debug("Detalhes do chat null para: {}", chat.getPhone());
-                    }
-                } catch (Exception e) {
-                    log.warn("Erro ao buscar foto de perfil para {}: {}", chat.getPhone(), e.getMessage());
-                }
-            });
-        });
-    }
-
-    /**
-     * Buscar chats do banco de dados
+     * ✅ MODIFICADO: Buscar chats do banco de dados (apenas ativos)
      */
     public ChatsListResponseDTO getChatsFromDatabase(User user) {
         try {
@@ -346,10 +344,13 @@ public class ChatService {
             // ✅ SINCRONIZAR lastMessageContent antes de retornar
             syncLastMessageContent(activeInstance.getId());
 
-            List<Chat> chats = chatRepository.findByWebInstanceIdOrderByLastMessageTimeDesc(activeInstance.getId());
+            // ✅ BUSCAR APENAS CHATS ATIVOS
+            List<Chat> chats = chatRepository.findByWebInstanceIdAndActiveInZapiTrueOrderByLastMessageTimeDesc(activeInstance.getId());
+            log.info("📊 Carregados {} chats ativos do banco de dados", chats.size());
+
             return buildSuccessResponse(chats);
         } catch (Exception e) {
-            log.error("Erro ao buscar chats do banco: {}", e.getMessage());
+            log.error("❌ Erro ao buscar chats do banco: {}", e.getMessage());
             return buildErrorResponse(e.getMessage());
         }
     }
@@ -397,7 +398,7 @@ public class ChatService {
         }
 
         chatRepository.save(chat);
-        log.info("Tags adicionadas ao chat {}: {}", chatId, tagIds);
+        log.info("✅ Tags adicionadas ao chat {}: {}", chatId, tagIds);
     }
 
     /**
@@ -424,7 +425,7 @@ public class ChatService {
 
         chat.removeTag(tag);
         chatRepository.save(chat);
-        log.info("Tag {} removida do chat {}", tagId, chatId);
+        log.info("✅ Tag {} removida do chat {}", tagId, chatId);
     }
 
     /**
@@ -460,7 +461,7 @@ public class ChatService {
         }
 
         chatRepository.save(chat);
-        log.info("Tags do chat {} atualizadas: {}", chatId, tagIds);
+        log.info("✅ Tags do chat {} atualizadas: {}", chatId, tagIds);
     }
 
     // ============================================
@@ -525,7 +526,7 @@ public class ChatService {
                 .name(chat.getName())
                 .phone(chat.getPhone())
                 .lastMessageTime(chat.getLastMessageTime())
-                .lastMessageContent(chat.getLastMessageContent()) // ✅ Incluído
+                .lastMessageContent(chat.getLastMessageContent())
                 .isGroup(chat.getIsGroup())
                 .unread(chat.getUnread())
                 .profileThumbnail(chat.getProfileThumbnail())

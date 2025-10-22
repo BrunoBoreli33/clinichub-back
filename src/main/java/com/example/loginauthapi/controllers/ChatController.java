@@ -5,6 +5,7 @@ import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.ChatRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
+import com.example.loginauthapi.services.RoutineAutomationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -24,6 +25,7 @@ public class ChatController {
 
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
+    private final RoutineAutomationService routineAutomationService;
 
     private User getAuthenticatedUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -135,6 +137,63 @@ public class ChatController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                     "success", false,
                     "message", "Erro ao marcar chat como lido: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * ✅ NOVO: PATCH /dashboard/chats/{chatId}/reset-routine
+     * Reseta o estado das rotinas automáticas de um chat
+     * Zera last_routine_sent, lastAutomatedMessageSent e marca inRepescagem como false
+     * Se o chat estiver em Repescagem, remove da coluna
+     */
+    @PatchMapping("/{chatId}/reset-routine")
+    public ResponseEntity<Map<String, Object>> resetChatRoutine(@PathVariable String chatId) {
+        try {
+            log.info("🔄 Resetando rotinas do chat {}", chatId);
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            // Busca o chat
+            Chat chat = chatRepository.findById(chatId)
+                    .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+
+            // Verifica se o chat pertence ao usuário
+            if (!chat.getWebInstance().getId().equals(instance.getId())) {
+                log.warn("⚠️ Tentativa de acesso não autorizado ao chat {}", chatId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "success", false,
+                        "message", "Chat não pertence ao usuário"
+                ));
+            }
+
+            // ✅ NOVA LÓGICA: Verifica se o chat está em Repescagem antes de resetar
+            boolean wasInRepescagem = "followup".equals(chat.getColumn());
+
+            // Chama o serviço de rotinas para resetar
+            routineAutomationService.resetChatRoutineState(chatId);
+
+            log.info("✅ Rotinas do chat {} resetadas pelo usuário {}", chatId, user.getEmail());
+
+            // ✅ Se estava em Repescagem, informar ao usuário
+            if (wasInRepescagem) {
+                return ResponseEntity.ok(Map.of(
+                        "success", true,
+                        "message", "Rotinas resetadas e chat removido da Repescagem com sucesso"
+                ));
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Rotinas resetadas com sucesso"
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao resetar rotinas do chat {}", chatId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao resetar rotinas: " + e.getMessage()
             ));
         }
     }

@@ -18,12 +18,12 @@ import java.util.Set;
 @Table(name = "chats", indexes = {
         @Index(name = "idx_web_instance_id", columnList = "web_instance_id"),
         @Index(name = "idx_phone", columnList = "phone"),
-        @Index(name = "idx_last_message_time", columnList = "last_message_time")
+        @Index(name = "idx_last_message_time", columnList = "last_message_time"),
+        @Index(name = "idx_active_in_zapi", columnList = "active_in_zapi") // ✅ NOVO ÍNDICE
 },
         uniqueConstraints = {
                 @UniqueConstraint(columnNames = {"web_instance_id", "phone"})
         }
-
 )
 public class Chat {
 
@@ -43,7 +43,7 @@ public class Chat {
     @Column(name = "last_message_time")
     private LocalDateTime lastMessageTime;
 
-    // ✅ NOVO: Conteúdo da última mensagem enviada/recebida
+    // ✅ Conteúdo da última mensagem enviada/recebida
     @Column(name = "last_message_content", columnDefinition = "TEXT")
     private String lastMessageContent;
 
@@ -60,6 +60,11 @@ public class Chat {
 
     @Column(name = "column_name")
     private String column;
+
+    // ✅ NOVO CAMPO: Controla se o chat está ativo na instância Z-API atual
+    // Permite isolar chats por instância sem perder histórico
+    @Column(name = "active_in_zapi", nullable = false)
+    private Boolean activeInZapi = true;
 
     @ManyToMany(fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     @JoinTable(
@@ -79,6 +84,11 @@ public class Chat {
     public void prePersist() {
         this.criadoEm = LocalDateTime.now();
         this.atualizadoEm = LocalDateTime.now();
+
+        // ✅ Garantir que activeInZapi nunca seja null
+        if (this.activeInZapi == null) {
+            this.activeInZapi = true;
+        }
     }
 
     @PreUpdate
@@ -101,11 +111,5 @@ public class Chat {
         for (Tag tag : new HashSet<>(this.tags)) {
             removeTag(tag);
         }
-    }
-
-    @Table(uniqueConstraints = {
-            @UniqueConstraint(columnNames = {"web_instance_id", "phone"})
-    })
-    public static class ChatUniqueConstraint {
     }
 }
