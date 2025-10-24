@@ -7,7 +7,9 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Getter
@@ -19,7 +21,7 @@ import java.util.Set;
         @Index(name = "idx_web_instance_id", columnList = "web_instance_id"),
         @Index(name = "idx_phone", columnList = "phone"),
         @Index(name = "idx_last_message_time", columnList = "last_message_time"),
-        @Index(name = "idx_active_in_zapi", columnList = "active_in_zapi") // ✅ NOVO ÍNDICE
+        @Index(name = "idx_active_in_zapi", columnList = "active_in_zapi")
 },
         uniqueConstraints = {
                 @UniqueConstraint(columnNames = {"web_instance_id", "phone"})
@@ -61,10 +63,18 @@ public class Chat {
     @Column(name = "column_name")
     private String column;
 
+    // ✅ NOVO CAMPO: Armazena a coluna anterior antes de ir para "tarefa"
+    @Column(name = "previous_column")
+    private String previousColumn;
+
     // ✅ NOVO CAMPO: Controla se o chat está ativo na instância Z-API atual
     // Permite isolar chats por instância sem perder histórico
     @Column(name = "active_in_zapi", nullable = false)
     private Boolean activeInZapi = true;
+
+    // ✅ ALTERADO: De @OneToOne para @OneToMany
+    @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Task> tasks = new ArrayList<>();
 
     @ManyToMany(fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     @JoinTable(
