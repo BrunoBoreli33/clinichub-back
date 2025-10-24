@@ -366,6 +366,48 @@ public class ChatService {
         chatRepository.save(chat);
     }
 
+    /**
+     * Atualizar coluna do chat salvando a coluna anterior
+     */
+    @Transactional
+    public void updateChatColumnWithPrevious(String chatId, String newColumn) {
+        Chat chat = chatRepository.findById(chatId)
+                .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+
+        // Salvar coluna atual como previousColumn antes de mudar
+        if (chat.getColumn() != null && !chat.getColumn().equals(newColumn)) {
+            chat.setPreviousColumn(chat.getColumn());
+        }
+
+        chat.setColumn(newColumn);
+        chatRepository.save(chat);
+
+        log.info("✅ Chat {} movido de '{}' para '{}'", chatId, chat.getPreviousColumn(), newColumn);
+    }
+
+    /**
+     * Retornar chat para previousColumn
+     */
+    @Transactional
+    public void returnChatToPreviousColumn(String chatId) {
+        Chat chat = chatRepository.findById(chatId)
+                .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+
+        String previousColumn = chat.getPreviousColumn();
+
+        // Se previousColumn for null ou vazio, usar "inbox" como padrão
+        if (previousColumn == null || previousColumn.isEmpty()) {
+            previousColumn = "inbox";
+            log.warn("⚠️ Chat {} sem previousColumn, usando 'inbox' como padrão", chatId);
+        }
+
+        chat.setColumn(previousColumn);
+        chat.setPreviousColumn(null); // Limpar previousColumn
+        chatRepository.save(chat);
+
+        log.info("✅ Chat {} retornou para coluna '{}'", chatId, previousColumn);
+    }
+
     // ============================================
     // MÉTODOS DE GERENCIAMENTO DE TAGS
     // ============================================
