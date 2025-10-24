@@ -100,6 +100,28 @@ public class TaskController {
     }
 
     /**
+     * GET /api/tasks/chat/{chatId}/all - Listar todas as tarefas de um chat
+     */
+    @GetMapping("/chat/{chatId}/all")
+    public ResponseEntity<Map<String, Object>> getAllTasksByChatId(@PathVariable String chatId) {
+        try {
+            User user = getAuthenticatedUser();
+            java.util.List<TaskDTO> tasks = taskService.getAllTasksByChat(chatId, user);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "tasks", tasks
+            ));
+        } catch (Exception e) {
+            log.error("âŒ Erro ao listar tarefas por chat: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
      * PUT /api/tasks/{id} - Atualizar tarefa
      */
     @PutMapping("/{id}")
