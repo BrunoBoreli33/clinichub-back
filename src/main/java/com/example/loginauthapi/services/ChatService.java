@@ -12,6 +12,7 @@ import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.ChatRepository;
 import com.example.loginauthapi.repositories.MessageRepository;
+import com.example.loginauthapi.repositories.AudioRepository;
 import com.example.loginauthapi.repositories.TagRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.zapi.ZapiChatService;
@@ -40,6 +41,7 @@ public class ChatService {
     private final ZapiChatService zapiChatService;
     private final TagRepository tagRepository;
     private final MessageRepository messageRepository;
+    private final AudioRepository audioRepository;
 
     // Armazenar progresso do carregamento por userId
     private final ConcurrentHashMap<String, LoadingProgress> loadingProgressMap = new ConcurrentHashMap<>();
@@ -92,7 +94,7 @@ public class ChatService {
 
     /**
      * ✅ MODIFICADO: Sincronizar lastMessageContent apenas de chats ATIVOS
-     * Busca a última mensagem de cada chat ativo e atualiza o campo lastMessageContent
+     * Busca a última mensagem de cada chat ativo (texto OU áudio) e atualiza o campo lastMessageContent
      */
     @Transactional
     public void syncLastMessageContent(String webInstanceId) {
@@ -104,19 +106,35 @@ public class ChatService {
 
         for (Chat chat : chats) {
             try {
+                // ✅ BUSCAR ÚLTIMA MENSAGEM DE TEXTO
                 Optional<Message> lastMessage = messageRepository.findTopByChatIdOrderByTimestampDesc(chat.getId());
 
-                if (lastMessage.isPresent()) {
-                    Message msg = lastMessage.get();
-                    String content;
+                // ✅ BUSCAR ÚLTIMO ÁUDIO
+                Optional<com.example.loginauthapi.entities.Audio> lastAudio =
+                        audioRepository.findTopByChatIdOrderByTimestampDesc(chat.getId());
 
-                    // Verificar tipo de mensagem
-                    if ("audio".equals(msg.getType())) {
-                        content = "🎤 Áudio";
+                // Determinar qual é mais recente (mensagem de texto ou áudio)
+                LocalDateTime lastMessageTime = lastMessage.map(Message::getTimestamp).orElse(null);
+                LocalDateTime lastAudioTime = lastAudio.map(com.example.loginauthapi.entities.Audio::getTimestamp).orElse(null);
+
+                String content = null;
+
+                // Comparar timestamps e usar o mais recente
+                if (lastMessageTime != null && lastAudioTime != null) {
+                    if (lastAudioTime.isAfter(lastMessageTime)) {
+                        content = "Mensagem de Áudio";
                     } else {
-                        content = msg.getContent();
+                        Message msg = lastMessage.get();
+                        content = "audio".equals(msg.getType()) ? "🎤 Áudio" : msg.getContent();
                     }
+                } else if (lastAudioTime != null) {
+                    content = "Mensagem de Áudio";
+                } else if (lastMessageTime != null) {
+                    Message msg = lastMessage.get();
+                    content = "audio".equals(msg.getType()) ? "🎤 Áudio" : msg.getContent();
+                }
 
+                if (content != null) {
                     // Truncar mensagem
                     String truncated = truncateMessage(content, 50);
 
@@ -145,6 +163,7 @@ public class ChatService {
         log.info("✅ Sincronização concluída: {} chats ativos atualizados de {} chats totais",
                 updated, chats.size());
     }
+
 
     /**
      * Truncar mensagem para exibição

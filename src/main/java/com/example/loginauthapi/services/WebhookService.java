@@ -216,7 +216,7 @@ public class WebhookService {
             Boolean viewOnce = (Boolean) audioObj.get("viewOnce");
             Boolean isStatusReply = (Boolean) payload.get("isStatusReply");
 
-            log.info("🎤 Áudio - URL: {}, Duração: {}s", audioUrl, seconds);
+            log.info("🎤 Áudio - URL: {}, Duração: {}s, FromMe: {}", audioUrl, seconds, fromMe);
 
             // ===== BUSCAR INSTÂNCIA =====
             Optional<WebInstance> instanceOpt = Optional.empty();
@@ -250,7 +250,7 @@ public class WebhookService {
                 chat.setUnread(fromMe ? 0 : 1);
                 chat.setColumn("inbox");
                 chat.setProfileThumbnail(senderPhoto);
-                chat.setLastMessageContent("🎤 Áudio");
+                chat.setLastMessageContent("Mensagem de Áudio"); // ✅ MODIFICADO
                 chat = chatRepository.save(chat);
                 isNewChat = true;
                 log.info("✅ Novo chat criado para áudio - ID: {}", chat.getId());
@@ -266,7 +266,7 @@ public class WebhookService {
                     chat.setProfileThumbnail(senderPhoto);
                 }
 
-                chat.setLastMessageContent("🎤 Áudio");
+                chat.setLastMessageContent("Mensagem de Áudio"); // ✅ MODIFICADO
 
                 if (fromMe) {
                     chat.setUnread(0);
@@ -280,11 +280,22 @@ public class WebhookService {
                 chat = chatRepository.save(chat);
             }
 
+            // ✅ NOVO: Garantir que senderName esteja correto
+            // Se fromMe=true (áudio enviado), usar o nome do chat como senderName
+            String finalSenderName = senderName;
+            if (fromMe != null && fromMe) {
+                // Para áudios enviados, usar o nome do chat se senderName estiver vazio
+                if (finalSenderName == null || finalSenderName.trim().isEmpty()) {
+                    finalSenderName = chat.getName();
+                    log.info("🔧 SenderName vazio para áudio enviado, usando nome do chat: {}", finalSenderName);
+                }
+            }
+
             // ===== SALVAR ÁUDIO =====
             audioService.saveIncomingAudio(
                     chat.getId(), messageId, instanceId, connectedPhone, phone, fromMe,
                     momment, seconds, audioUrl, mimeType, viewOnce, isStatusReply,
-                    senderName, senderPhoto, status
+                    finalSenderName, senderPhoto, status  // ✅ Usar finalSenderName
             );
 
             // ===== ATUALIZAR lastMessageTime =====
@@ -294,11 +305,12 @@ public class WebhookService {
             ));
             chat = chatRepository.save(chat);
 
-            log.info("✅ Áudio processado com sucesso - MessageId: {}, Chat: {}", messageId, chat.getId());
+            log.info("✅ Áudio processado com sucesso - MessageId: {}, Chat: {}, SenderName: {}",
+                    messageId, chat.getId(), finalSenderName);
 
             // ===== ENVIAR NOTIFICAÇÃO SSE =====
             if (!fromMe) {
-                sendNotificationToUser(instance.getUser().getId(), chat, "🎤 Áudio", isNewChat);
+                sendNotificationToUser(instance.getUser().getId(), chat, chat.getLastMessageContent(), isNewChat); // ✅ MODIFICADO
             } else {
                 sendChatUpdateToUser(instance.getUser().getId(), chat);
             }

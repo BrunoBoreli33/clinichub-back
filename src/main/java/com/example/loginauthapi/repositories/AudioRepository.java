@@ -13,6 +13,9 @@ public interface AudioRepository extends JpaRepository<Audio, String> {
 
     Optional<Audio> findByMessageId(String messageId);
 
+    // ✅ NOVO: Buscar o último áudio de um chat
+    Optional<Audio> findTopByChatIdOrderByTimestampDesc(String chatId);
+
     List<Audio> findByChatIdOrderByTimestampAsc(String chatId);
 
     @Query("SELECT a FROM Audio a WHERE a.chat.id = :chatId ORDER BY a.timestamp ASC")
