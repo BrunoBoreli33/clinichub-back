@@ -20,6 +20,7 @@ import java.util.Optional;
 public class WebhookService {
 
     private final MessageService messageService;
+    private final AudioService audioService; // ✅ ADICIONAR ESTA LINHA
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
     private final NotificationService notificationService;
@@ -52,6 +53,19 @@ public class WebhookService {
             Boolean isForwarded = (Boolean) payload.get("forwarded");
             Boolean isGroup = (Boolean) payload.get("isGroup");
 
+            // ✅ NOVO: Verificar se é áudio
+            @SuppressWarnings("unchecked")
+            Map<String, Object> audioObj = (Map<String, Object>) payload.get("audio");
+
+            if (audioObj != null) {
+                // ✅ PROCESSAR ÁUDIO
+                processAudio(payload, audioObj, fromMe, momment, connectedPhone, phone,
+                        instanceId, messageId, chatName, senderName, status,
+                        senderPhoto, isForwarded, isGroup);
+                return;
+            }
+
+            // ===== PROCESSAR TEXTO (CÓDIGO ORIGINAL MANTIDO) =====
             // Extrair conteúdo da mensagem
             @SuppressWarnings("unchecked")
             Map<String, Object> textObj = (Map<String, Object>) payload.get("text");
@@ -184,6 +198,125 @@ public class WebhookService {
         } catch (Exception e) {
             log.error("❌ Erro ao processar mensagem", e);
             throw new RuntimeException("Erro ao processar webhook: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Processar mensagem de áudio
+     */
+    private void processAudio(Map<String, Object> payload, Map<String, Object> audioObj,
+                              Boolean fromMe, Long momment, String connectedPhone, String phone,
+                              String instanceId, String messageId, String chatName, String senderName,
+                              String status, String senderPhoto, Boolean isForwarded, Boolean isGroup) {
+        try {
+            String audioUrl = (String) audioObj.get("audioUrl");
+            Integer seconds = audioObj.get("seconds") != null ?
+                    ((Number) audioObj.get("seconds")).intValue() : 0;
+            String mimeType = (String) audioObj.get("mimeType");
+            Boolean viewOnce = (Boolean) audioObj.get("viewOnce");
+            Boolean isStatusReply = (Boolean) payload.get("isStatusReply");
+
+            log.info("🎤 Áudio - URL: {}, Duração: {}s, FromMe: {}", audioUrl, seconds, fromMe);
+
+            // ===== BUSCAR INSTÂNCIA =====
+            Optional<WebInstance> instanceOpt = Optional.empty();
+
+            if (instanceId != null && !instanceId.trim().isEmpty()) {
+                instanceOpt = webInstanceRepository.findBySuaInstancia(instanceId);
+            }
+
+            if (instanceOpt.isEmpty() && connectedPhone != null) {
+                instanceOpt = webInstanceRepository.findByConnectedPhone(connectedPhone);
+            }
+
+            if (instanceOpt.isEmpty()) {
+                log.warn("⚠️ WebInstance não encontrada para áudio");
+                return;
+            }
+
+            WebInstance instance = instanceOpt.get();
+
+            // ===== BUSCAR OU CRIAR CHAT =====
+            Optional<Chat> chatOpt = chatRepository.findByWebInstanceIdAndPhone(instance.getId(), phone);
+            Chat chat;
+            boolean isNewChat = false;
+
+            if (chatOpt.isEmpty()) {
+                chat = new Chat();
+                chat.setWebInstance(instance);
+                chat.setPhone(phone);
+                chat.setName(chatName != null ? chatName : phone);
+                chat.setIsGroup(isGroup != null ? isGroup : false);
+                chat.setUnread(fromMe ? 0 : 1);
+                chat.setColumn("inbox");
+                chat.setProfileThumbnail(senderPhoto);
+                chat.setLastMessageContent("Mensagem de Áudio"); // ✅ MODIFICADO
+                chat = chatRepository.save(chat);
+                isNewChat = true;
+                log.info("✅ Novo chat criado para áudio - ID: {}", chat.getId());
+            } else {
+                chat = chatOpt.get();
+                int previousUnread = chat.getUnread();
+
+                if (chatName != null && !chatName.equals(chat.getName())) {
+                    chat.setName(chatName);
+                }
+
+                if (senderPhoto != null && !senderPhoto.isEmpty()) {
+                    chat.setProfileThumbnail(senderPhoto);
+                }
+
+                chat.setLastMessageContent("Mensagem de Áudio"); // ✅ MODIFICADO
+
+                if (fromMe) {
+                    chat.setUnread(0);
+                    log.info("📤 Áudio enviado - Resetando contador (unread: {} → 0)", previousUnread);
+                } else {
+                    chat.setUnread(chat.getUnread() + 1);
+                    log.info("📥 Áudio recebido - Incrementando contador (unread: {} → {})",
+                            previousUnread, chat.getUnread());
+                }
+
+                chat = chatRepository.save(chat);
+            }
+
+            // ✅ NOVO: Garantir que senderName esteja correto
+            // Se fromMe=true (áudio enviado), usar o nome do chat como senderName
+            String finalSenderName = senderName;
+            if (fromMe != null && fromMe) {
+                // Para áudios enviados, usar o nome do chat se senderName estiver vazio
+                if (finalSenderName == null || finalSenderName.trim().isEmpty()) {
+                    finalSenderName = chat.getName();
+                    log.info("🔧 SenderName vazio para áudio enviado, usando nome do chat: {}", finalSenderName);
+                }
+            }
+
+            // ===== SALVAR ÁUDIO =====
+            audioService.saveIncomingAudio(
+                    chat.getId(), messageId, instanceId, connectedPhone, phone, fromMe,
+                    momment, seconds, audioUrl, mimeType, viewOnce, isStatusReply,
+                    finalSenderName, senderPhoto, status  // ✅ Usar finalSenderName
+            );
+
+            // ===== ATUALIZAR lastMessageTime =====
+            chat.setLastMessageTime(LocalDateTime.ofInstant(
+                    java.time.Instant.ofEpochMilli(momment),
+                    java.time.ZoneId.systemDefault()
+            ));
+            chat = chatRepository.save(chat);
+
+            log.info("✅ Áudio processado com sucesso - MessageId: {}, Chat: {}, SenderName: {}",
+                    messageId, chat.getId(), finalSenderName);
+
+            // ===== ENVIAR NOTIFICAÇÃO SSE =====
+            if (!fromMe) {
+                sendNotificationToUser(instance.getUser().getId(), chat, chat.getLastMessageContent(), isNewChat); // ✅ MODIFICADO
+            } else {
+                sendChatUpdateToUser(instance.getUser().getId(), chat);
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao processar áudio", e);
         }
     }
 

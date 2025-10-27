@@ -1,9 +1,11 @@
 package com.example.loginauthapi.controllers;
 
+import com.example.loginauthapi.dto.AudioDTO;
 import com.example.loginauthapi.dto.MessageDTO;
 import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
+import com.example.loginauthapi.services.AudioService;
 import com.example.loginauthapi.services.MessageService;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ import java.util.Map;
 public class MessageController {
 
     private final MessageService messageService;
+    private final AudioService audioService; // ✅ ADICIONADO
     private final ZapiMessageService zapiMessageService;
     private final WebInstanceRepository webInstanceRepository;
 
@@ -67,8 +70,8 @@ public class MessageController {
     }
 
     /**
-     * GET /dashboard/messages/{chatId}
-     * Buscar mensagens de um chat
+     * ✅ MODIFICADO: GET /dashboard/messages/{chatId}
+     * Buscar mensagens E áudios de um chat
      */
     @GetMapping("/{chatId}")
     public ResponseEntity<Map<String, Object>> getMessages(@PathVariable String chatId) {
@@ -78,12 +81,17 @@ public class MessageController {
             User user = getAuthenticatedUser();
             List<MessageDTO> messages = messageService.getMessagesByChatId(chatId, user);
 
-            log.info("✅ Mensagens carregadas com sucesso - Total: {}", messages.size());
+            // ✅ ADICIONADO: Buscar áudios também
+            List<AudioDTO> audios = audioService.getAudiosByChatId(chatId);
+
+            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}", messages.size(), audios.size());
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
                     "messages", messages,
-                    "total", messages.size()
+                    "audios", audios, // ✅ ADICIONADO
+                    "totalMessages", messages.size(),
+                    "totalAudios", audios.size() // ✅ ADICIONADO
             ));
         } catch (Exception e) {
             log.error("❌ Erro ao buscar mensagens - ChatId: {}, Erro: {}", chatId, e.getMessage(), e);
@@ -173,8 +181,8 @@ public class MessageController {
     }
 
     /**
-     * ✅ NOVO: POST /dashboard/messages/send-audio
-     * Enviar mensagem de áudio
+     * ✅ MODIFICADO: POST /dashboard/messages/send-audio
+     * Enviar mensagem de áudio (usando AudioService ao invés de MessageService)
      */
     @PostMapping("/send-audio")
     public ResponseEntity<Map<String, Object>> sendAudio(@RequestBody Map<String, Object> body) {
@@ -199,11 +207,9 @@ public class MessageController {
                 ));
             }
 
-            // ✅ PASSO 1: Salvar áudio no banco
+            // ✅ MODIFICADO: Usar audioService ao invés de messageService
             log.info("💾 Salvando áudio no banco antes de enviar");
-            MessageDTO savedMessage = messageService.saveOutgoingAudioMessage(
-                    chatId, audioBase64, duration, user
-            );
+            AudioDTO savedAudio = audioService.saveOutgoingAudio(chatId, phone, duration, "");
 
             // ✅ PASSO 2: Enviar via Z-API
             log.info("📨 Enviando áudio via Z-API - Phone: {}", phone);
@@ -211,14 +217,22 @@ public class MessageController {
                     instance, phone, audioBase64, waveform
             );
 
-            // ✅ PASSO 3: Atualizar com messageId real
+            // ✅ PASSO 3: Atualizar com messageId real e audioUrl
             if (zapiResult != null && zapiResult.containsKey("messageId")) {
                 String realMessageId = (String) zapiResult.get("messageId");
-                messageService.updateMessageIdAfterSend(
-                        savedMessage.getMessageId(), realMessageId, "SENT"
+
+                // ✅ MODIFICADO: Usar audioService ao invés de messageService
+                audioService.updateAudioIdAfterSend(
+                        savedAudio.getMessageId(), realMessageId, "SENT"
                 );
-                savedMessage.setMessageId(realMessageId);
-                savedMessage.setStatus("SENT");
+
+                savedAudio.setMessageId(realMessageId);
+                savedAudio.setStatus("SENT");
+
+                // Se a Z-API retornar a URL do áudio, atualizar também
+                if (zapiResult.containsKey("audioUrl")) {
+                    savedAudio.setAudioUrl((String) zapiResult.get("audioUrl"));
+                }
             }
 
             log.info("✅ Áudio enviado e salvo com sucesso");
@@ -226,7 +240,7 @@ public class MessageController {
             return ResponseEntity.ok(Map.of(
                     "success", true,
                     "message", "Áudio enviado com sucesso",
-                    "data", savedMessage
+                    "data", savedAudio
             ));
         } catch (Exception e) {
             log.error("❌ Erro ao enviar áudio: {}", e.getMessage(), e);
@@ -262,7 +276,7 @@ public class MessageController {
                 ));
             }
 
-            log.info("📝 Editando mensagem via Z-API - MessageId: {}", editMessageId);
+            log.info("🔍 Editando mensagem via Z-API - MessageId: {}", editMessageId);
 
             Map<String, Object> result = zapiMessageService.editMessage(
                     instance, phone, editMessageId, newMessage
