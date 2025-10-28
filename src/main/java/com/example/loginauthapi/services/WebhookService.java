@@ -20,13 +20,15 @@ import java.util.Optional;
 public class WebhookService {
 
     private final MessageService messageService;
-    private final AudioService audioService; // ✅ ADICIONAR ESTA LINHA
+    private final AudioService audioService;
+    private final PhotoService photoService; // ✅ ADICIONAR ESTA LINHA
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
     private final NotificationService notificationService;
 
     /**
      * ✅ MODIFICADO: Método unificado para processar QUALQUER mensagem
+     * - Suporta texto, áudio e fotos
      * - Reseta contador quando fromMe=true (mensagem enviada fora do sistema)
      * - Incrementa contador quando fromMe=false (mensagem recebida)
      * - Atualiza lastMessageContent SEMPRE
@@ -53,7 +55,19 @@ public class WebhookService {
             Boolean isForwarded = (Boolean) payload.get("forwarded");
             Boolean isGroup = (Boolean) payload.get("isGroup");
 
-            // ✅ NOVO: Verificar se é áudio
+            // ✅ NOVO: Verificar se é imagem
+            @SuppressWarnings("unchecked")
+            Map<String, Object> imageObj = (Map<String, Object>) payload.get("image");
+
+            if (imageObj != null) {
+                // ✅ PROCESSAR FOTO
+                processPhoto(payload, imageObj, fromMe, momment, connectedPhone, phone,
+                        instanceId, messageId, chatName, senderName, status,
+                        senderPhoto, isForwarded, isGroup);
+                return;
+            }
+
+            // ✅ Verificar se é áudio
             @SuppressWarnings("unchecked")
             Map<String, Object> audioObj = (Map<String, Object>) payload.get("audio");
 
@@ -76,7 +90,7 @@ public class WebhookService {
                 return;
             }
 
-            log.info("🔍 Mensagem extraída - FromMe: {}, Phone: {}, InstanceId: {}, Content: {}",
+            log.info("📝 Mensagem extraída - FromMe: {}, Phone: {}, InstanceId: {}, Content: {}",
                     fromMe, phone, instanceId, content);
 
             // ===== BUSCAR INSTÂNCIA POR INSTANCE ID =====
@@ -183,40 +197,151 @@ public class WebhookService {
             ));
             chat = chatRepository.save(chat);
 
-            log.info("✅ Mensagem processada com sucesso - MessageId: {}, Chat: {}, FromMe: {}",
-                    messageId, chat.getId(), fromMe);
-
-            // ===== ✅ ENVIAR NOTIFICAÇÃO SSE SEMPRE =====
+            // ✅ ENVIAR NOTIFICAÇÃO SSE
             if (!fromMe) {
-                // Mensagem RECEBIDA: Enviar notificação completa com som
                 sendNotificationToUser(instance.getUser().getId(), chat, content, isNewChat);
             } else {
-                // Mensagem ENVIADA: Enviar atualização de chat (sem som)
                 sendChatUpdateToUser(instance.getUser().getId(), chat);
             }
 
         } catch (Exception e) {
             log.error("❌ Erro ao processar mensagem", e);
-            throw new RuntimeException("Erro ao processar webhook: " + e.getMessage(), e);
         }
     }
 
     /**
-     * ✅ NOVO: Processar mensagem de áudio
+     * ✅ NOVO: Processar foto recebida via webhook
      */
-    private void processAudio(Map<String, Object> payload, Map<String, Object> audioObj,
-                              Boolean fromMe, Long momment, String connectedPhone, String phone,
-                              String instanceId, String messageId, String chatName, String senderName,
-                              String status, String senderPhoto, Boolean isForwarded, Boolean isGroup) {
+    @Transactional
+    public void processPhoto(Map<String, Object> payload, Map<String, Object> imageObj,
+                             Boolean fromMe, Long momment, String connectedPhone, String phone,
+                             String instanceId, String messageId, String chatName, String senderName,
+                             String status, String senderPhoto, Boolean isForwarded, Boolean isGroup) {
         try {
+            log.info("📸 Processando foto do webhook");
+
+            // ===== EXTRAIR DADOS DA FOTO =====
+            String imageUrl = (String) imageObj.get("imageUrl");
+            Integer width = imageObj.get("width") != null ? ((Number) imageObj.get("width")).intValue() : 0;
+            Integer height = imageObj.get("height") != null ? ((Number) imageObj.get("height")).intValue() : 0;
+            String mimeType = (String) imageObj.get("mimeType");
+            String caption = (String) imageObj.get("caption"); // ✅ NOVO: Extrair caption
+            Boolean isStatusReply = (Boolean) payload.get("isStatusReply");
+            Boolean isEdit = (Boolean) payload.get("isEdit");
+            Boolean isNewsletter = (Boolean) payload.get("isNewsletter");
+
+            log.info("📸 Dados da foto - ImageUrl: {}, Width: {}, Height: {}, Caption: {}",
+                    imageUrl != null ? "presente" : "null", width, height, caption);
+
+            // ===== BUSCAR INSTÂNCIA =====
+            Optional<WebInstance> instanceOpt = Optional.empty();
+
+            if (instanceId != null && !instanceId.trim().isEmpty()) {
+                instanceOpt = webInstanceRepository.findBySuaInstancia(instanceId);
+            }
+
+            if (instanceOpt.isEmpty() && connectedPhone != null) {
+                instanceOpt = webInstanceRepository.findByConnectedPhone(connectedPhone);
+            }
+
+            if (instanceOpt.isEmpty()) {
+                log.warn("⚠️ WebInstance não encontrada para foto");
+                return;
+            }
+
+            WebInstance instance = instanceOpt.get();
+
+            // ===== BUSCAR OU CRIAR CHAT =====
+            Optional<Chat> chatOpt = chatRepository.findByWebInstanceIdAndPhone(instance.getId(), phone);
+            Chat chat;
+            boolean isNewChat = false;
+
+            if (chatOpt.isEmpty()) {
+                chat = new Chat();
+                chat.setWebInstance(instance);
+                chat.setPhone(phone);
+                chat.setName(chatName != null ? chatName : phone);
+                chat.setIsGroup(isGroup != null ? isGroup : false);
+                chat.setUnread(fromMe ? 0 : 1);
+                chat.setColumn("inbox");
+                chat.setProfileThumbnail(senderPhoto);
+                chat.setLastMessageContent("Foto 📸");
+                chat = chatRepository.save(chat);
+                isNewChat = true;
+                log.info("✅ Novo chat criado para foto - ID: {}", chat.getId());
+            } else {
+                chat = chatOpt.get();
+                int previousUnread = chat.getUnread();
+
+                if (chatName != null && !chatName.equals(chat.getName())) {
+                    chat.setName(chatName);
+                }
+
+                if (senderPhoto != null && !senderPhoto.isEmpty()) {
+                    chat.setProfileThumbnail(senderPhoto);
+                }
+
+                chat.setLastMessageContent("Foto 📸");
+
+                if (fromMe) {
+                    chat.setUnread(0);
+                    log.info("📤 Foto enviada - Resetando contador (unread: {} → 0)", previousUnread);
+                } else {
+                    chat.setUnread(chat.getUnread() + 1);
+                    log.info("📥 Foto recebida - Incrementando contador (unread: {} → {})",
+                            previousUnread, chat.getUnread());
+                }
+
+                chat = chatRepository.save(chat);
+            }
+
+            // ===== SALVAR FOTO =====
+            photoService.saveIncomingPhoto(
+                    chat.getId(), messageId, instanceId, phone, fromMe, momment,
+                    imageUrl, width, height, mimeType, caption, isStatusReply, isEdit,
+                    isGroup, isNewsletter, isForwarded, chatName, senderName, status
+            );
+
+            // ===== ATUALIZAR lastMessageTime =====
+            chat.setLastMessageTime(LocalDateTime.ofInstant(
+                    java.time.Instant.ofEpochMilli(momment),
+                    java.time.ZoneId.systemDefault()
+            ));
+            chat = chatRepository.save(chat);
+
+            log.info("✅ Foto processada com sucesso - MessageId: {}, Chat: {}", messageId, chat.getId());
+
+            // ===== ENVIAR NOTIFICAÇÃO SSE =====
+            if (!fromMe) {
+                sendNotificationToUser(instance.getUser().getId(), chat, chat.getLastMessageContent(), isNewChat);
+            } else {
+                sendChatUpdateToUser(instance.getUser().getId(), chat);
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao processar foto", e);
+        }
+    }
+
+    /**
+     * ✅ Processar áudio recebido via webhook
+     */
+    @Transactional
+    public void processAudio(Map<String, Object> payload, Map<String, Object> audioObj,
+                             Boolean fromMe, Long momment, String connectedPhone, String phone,
+                             String instanceId, String messageId, String chatName, String senderName,
+                             String status, String senderPhoto, Boolean isForwarded, Boolean isGroup) {
+        try {
+            log.info("🎤 Processando áudio do webhook");
+
+            // ===== EXTRAIR DADOS DO ÁUDIO =====
+            Integer seconds = audioObj.get("seconds") != null ? ((Number) audioObj.get("seconds")).intValue() : 0;
             String audioUrl = (String) audioObj.get("audioUrl");
-            Integer seconds = audioObj.get("seconds") != null ?
-                    ((Number) audioObj.get("seconds")).intValue() : 0;
             String mimeType = (String) audioObj.get("mimeType");
             Boolean viewOnce = (Boolean) audioObj.get("viewOnce");
             Boolean isStatusReply = (Boolean) payload.get("isStatusReply");
 
-            log.info("🎤 Áudio - URL: {}, Duração: {}s, FromMe: {}", audioUrl, seconds, fromMe);
+            log.info("🎤 Dados do áudio - Seconds: {}, AudioUrl: {}", seconds, audioUrl != null ? "presente" : "null");
 
             // ===== BUSCAR INSTÂNCIA =====
             Optional<WebInstance> instanceOpt = Optional.empty();
@@ -250,7 +375,7 @@ public class WebhookService {
                 chat.setUnread(fromMe ? 0 : 1);
                 chat.setColumn("inbox");
                 chat.setProfileThumbnail(senderPhoto);
-                chat.setLastMessageContent("Mensagem de Áudio"); // ✅ MODIFICADO
+                chat.setLastMessageContent("Mensagem de Áudio");
                 chat = chatRepository.save(chat);
                 isNewChat = true;
                 log.info("✅ Novo chat criado para áudio - ID: {}", chat.getId());
@@ -266,7 +391,7 @@ public class WebhookService {
                     chat.setProfileThumbnail(senderPhoto);
                 }
 
-                chat.setLastMessageContent("Mensagem de Áudio"); // ✅ MODIFICADO
+                chat.setLastMessageContent("Mensagem de Áudio");
 
                 if (fromMe) {
                     chat.setUnread(0);
@@ -281,10 +406,8 @@ public class WebhookService {
             }
 
             // ✅ NOVO: Garantir que senderName esteja correto
-            // Se fromMe=true (áudio enviado), usar o nome do chat como senderName
             String finalSenderName = senderName;
             if (fromMe != null && fromMe) {
-                // Para áudios enviados, usar o nome do chat se senderName estiver vazio
                 if (finalSenderName == null || finalSenderName.trim().isEmpty()) {
                     finalSenderName = chat.getName();
                     log.info("🔧 SenderName vazio para áudio enviado, usando nome do chat: {}", finalSenderName);
@@ -295,7 +418,7 @@ public class WebhookService {
             audioService.saveIncomingAudio(
                     chat.getId(), messageId, instanceId, connectedPhone, phone, fromMe,
                     momment, seconds, audioUrl, mimeType, viewOnce, isStatusReply,
-                    finalSenderName, senderPhoto, status  // ✅ Usar finalSenderName
+                    finalSenderName, senderPhoto, status
             );
 
             // ===== ATUALIZAR lastMessageTime =====
@@ -310,7 +433,7 @@ public class WebhookService {
 
             // ===== ENVIAR NOTIFICAÇÃO SSE =====
             if (!fromMe) {
-                sendNotificationToUser(instance.getUser().getId(), chat, chat.getLastMessageContent(), isNewChat); // ✅ MODIFICADO
+                sendNotificationToUser(instance.getUser().getId(), chat, chat.getLastMessageContent(), isNewChat);
             } else {
                 sendChatUpdateToUser(instance.getUser().getId(), chat);
             }
@@ -339,7 +462,7 @@ public class WebhookService {
             notificationData.put("chatName", chat.getName());
             notificationData.put("chatPhone", chat.getPhone());
             notificationData.put("message", messageContent);
-            notificationData.put("lastMessageContent", chat.getLastMessageContent()); // ✅ NOVO
+            notificationData.put("lastMessageContent", chat.getLastMessageContent());
             notificationData.put("unreadCount", chat.getUnread());
             notificationData.put("isNewChat", isNewChat);
             notificationData.put("profileThumbnail", chat.getProfileThumbnail());
@@ -366,7 +489,7 @@ public class WebhookService {
             chatData.put("chatId", chat.getId());
             chatData.put("chatName", chat.getName());
             chatData.put("chatPhone", chat.getPhone());
-            chatData.put("lastMessageContent", chat.getLastMessageContent()); // ✅ NOVO
+            chatData.put("lastMessageContent", chat.getLastMessageContent());
             chatData.put("unreadCount", chat.getUnread());
             chatData.put("profileThumbnail", chat.getProfileThumbnail());
             chatData.put("lastMessageTime", chat.getLastMessageTime() != null ?

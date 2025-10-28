@@ -2,11 +2,13 @@ package com.example.loginauthapi.controllers;
 
 import com.example.loginauthapi.dto.AudioDTO;
 import com.example.loginauthapi.dto.MessageDTO;
+import com.example.loginauthapi.dto.PhotoDTO;
 import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.AudioService;
 import com.example.loginauthapi.services.MessageService;
+import com.example.loginauthapi.services.PhotoService;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +28,8 @@ import java.util.Map;
 public class MessageController {
 
     private final MessageService messageService;
-    private final AudioService audioService; // ✅ ADICIONADO
+    private final AudioService audioService;
+    private final PhotoService photoService; // ✅ ADICIONADO
     private final ZapiMessageService zapiMessageService;
     private final WebInstanceRepository webInstanceRepository;
 
@@ -71,7 +74,7 @@ public class MessageController {
 
     /**
      * ✅ MODIFICADO: GET /dashboard/messages/{chatId}
-     * Buscar mensagens E áudios de um chat
+     * Buscar mensagens, áudios E fotos de um chat
      */
     @GetMapping("/{chatId}")
     public ResponseEntity<Map<String, Object>> getMessages(@PathVariable String chatId) {
@@ -81,17 +84,23 @@ public class MessageController {
             User user = getAuthenticatedUser();
             List<MessageDTO> messages = messageService.getMessagesByChatId(chatId, user);
 
-            // ✅ ADICIONADO: Buscar áudios também
+            // ✅ Buscar áudios
             List<AudioDTO> audios = audioService.getAudiosByChatId(chatId);
 
-            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}", messages.size(), audios.size());
+            // ✅ NOVO: Buscar fotos
+            List<PhotoDTO> photos = photoService.getPhotosByChatId(chatId);
+
+            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}, Fotos: {}",
+                    messages.size(), audios.size(), photos.size());
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
                     "messages", messages,
-                    "audios", audios, // ✅ ADICIONADO
+                    "audios", audios,
+                    "photos", photos, // ✅ ADICIONADO
                     "totalMessages", messages.size(),
-                    "totalAudios", audios.size() // ✅ ADICIONADO
+                    "totalAudios", audios.size(),
+                    "totalPhotos", photos.size() // ✅ ADICIONADO
             ));
         } catch (Exception e) {
             log.error("❌ Erro ao buscar mensagens - ChatId: {}, Erro: {}", chatId, e.getMessage(), e);
@@ -103,7 +112,65 @@ public class MessageController {
     }
 
     /**
-     * ✅ MODIFICADO: POST /dashboard/messages/send
+     * ✅ NOVO: GET /dashboard/messages/gallery
+     * Buscar fotos salvas na galeria do usuário
+     */
+    @GetMapping("/gallery")
+    public ResponseEntity<Map<String, Object>> getGalleryPhotos() {
+        try {
+            log.info("🖼️ Requisição para buscar fotos da galeria");
+
+            User user = getAuthenticatedUser();
+            List<PhotoDTO> photos = photoService.getSavedGalleryPhotos(user.getId());
+
+            log.info("✅ Fotos da galeria carregadas - Total: {}", photos.size());
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "photos", photos,
+                    "total", photos.size()
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar galeria - Erro: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * ✅ NOVO: PUT /dashboard/messages/photos/{photoId}/toggle-gallery
+     * Marcar/desmarcar foto como salva na galeria
+     */
+    @PutMapping("/photos/{photoId}/toggle-gallery")
+    public ResponseEntity<Map<String, Object>> togglePhotoInGallery(@PathVariable String photoId) {
+        try {
+            log.info("🖼️ Requisição para salvar/remover foto da galeria - PhotoId: {}", photoId);
+
+            User user = getAuthenticatedUser();
+            PhotoDTO photo = photoService.toggleSaveInGallery(photoId);
+
+            log.info("✅ Foto {} {} galeria",
+                    photo.getSavedInGallery() ? "salva na" : "removida da",
+                    photo.getSavedInGallery() ? "" : "");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", photo.getSavedInGallery() ? "Foto salva na galeria" : "Foto removida da galeria",
+                    "photo", photo
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao salvar/remover foto da galeria - Erro: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * POST /dashboard/messages/send
      * Enviar mensagem (salva ANTES de enviar)
      */
     @PostMapping("/send")
@@ -181,7 +248,7 @@ public class MessageController {
     }
 
     /**
-     * ✅ MODIFICADO: POST /dashboard/messages/send-audio
+     * POST /dashboard/messages/send-audio
      * Enviar mensagem de áudio (usando AudioService ao invés de MessageService)
      */
     @PostMapping("/send-audio")
@@ -276,7 +343,7 @@ public class MessageController {
                 ));
             }
 
-            log.info("🔍 Editando mensagem via Z-API - MessageId: {}", editMessageId);
+            log.info("📝 Editando mensagem via Z-API - MessageId: {}", editMessageId);
 
             Map<String, Object> result = zapiMessageService.editMessage(
                     instance, phone, editMessageId, newMessage
