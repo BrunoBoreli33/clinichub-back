@@ -3,12 +3,14 @@ package com.example.loginauthapi.controllers;
 import com.example.loginauthapi.dto.AudioDTO;
 import com.example.loginauthapi.dto.MessageDTO;
 import com.example.loginauthapi.dto.PhotoDTO;
+import com.example.loginauthapi.dto.VideoDTO;
 import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.AudioService;
 import com.example.loginauthapi.services.MessageService;
 import com.example.loginauthapi.services.PhotoService;
+import com.example.loginauthapi.services.VideoService;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,7 +31,8 @@ public class MessageController {
 
     private final MessageService messageService;
     private final AudioService audioService;
-    private final PhotoService photoService; // ✅ ADICIONADO
+    private final PhotoService photoService;
+    private final VideoService videoService;
     private final ZapiMessageService zapiMessageService;
     private final WebInstanceRepository webInstanceRepository;
 
@@ -74,7 +77,7 @@ public class MessageController {
 
     /**
      * ✅ MODIFICADO: GET /dashboard/messages/{chatId}
-     * Buscar mensagens, áudios E fotos de um chat
+     * Buscar mensagens, áudios, fotos E vídeos de um chat
      */
     @GetMapping("/{chatId}")
     public ResponseEntity<Map<String, Object>> getMessages(@PathVariable String chatId) {
@@ -87,20 +90,25 @@ public class MessageController {
             // ✅ Buscar áudios
             List<AudioDTO> audios = audioService.getAudiosByChatId(chatId);
 
-            // ✅ NOVO: Buscar fotos
+            // ✅ Buscar fotos
             List<PhotoDTO> photos = photoService.getPhotosByChatId(chatId);
 
-            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}, Fotos: {}",
-                    messages.size(), audios.size(), photos.size());
+            // ✅ Buscar vídeos
+            List<VideoDTO> videos = videoService.getVideosByChatId(chatId);
+
+            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}, Fotos: {}, Vídeos: {}",
+                    messages.size(), audios.size(), photos.size(), videos.size());
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
                     "messages", messages,
                     "audios", audios,
-                    "photos", photos, // ✅ ADICIONADO
+                    "photos", photos,
+                    "videos", videos,
                     "totalMessages", messages.size(),
                     "totalAudios", audios.size(),
-                    "totalPhotos", photos.size() // ✅ ADICIONADO
+                    "totalPhotos", photos.size(),
+                    "totalVideos", videos.size()
             ));
         } catch (Exception e) {
             log.error("❌ Erro ao buscar mensagens - ChatId: {}, Erro: {}", chatId, e.getMessage(), e);
@@ -140,6 +148,37 @@ public class MessageController {
     }
 
     /**
+     * ✅ NOVO: GET /dashboard/messages/gallery/all
+     * Buscar fotos e vídeos salvos na galeria do usuário
+     */
+    @GetMapping("/gallery/all")
+    public ResponseEntity<Map<String, Object>> getGalleryAll() {
+        try {
+            log.info("🖼️ Requisição para buscar galeria completa (fotos + vídeos)");
+
+            User user = getAuthenticatedUser();
+            List<PhotoDTO> photos = photoService.getSavedGalleryPhotos(user.getId());
+            List<VideoDTO> videos = videoService.getSavedGalleryVideos(user.getId());
+
+            log.info("✅ Galeria carregada - Fotos: {}, Vídeos: {}", photos.size(), videos.size());
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "photos", photos,
+                    "videos", videos,
+                    "totalPhotos", photos.size(),
+                    "totalVideos", videos.size()
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar galeria - Erro: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
      * ✅ NOVO: PUT /dashboard/messages/photos/{photoId}/toggle-gallery
      * Marcar/desmarcar foto como salva na galeria
      */
@@ -162,6 +201,36 @@ public class MessageController {
             ));
         } catch (Exception e) {
             log.error("❌ Erro ao salvar/remover foto da galeria - Erro: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * ✅ NOVO: PUT /dashboard/messages/videos/{videoId}/toggle-gallery
+     * Marcar/desmarcar vídeo como salvo na galeria
+     */
+    @PutMapping("/videos/{videoId}/toggle-gallery")
+    public ResponseEntity<Map<String, Object>> toggleVideoInGallery(@PathVariable String videoId) {
+        try {
+            log.info("🎥 Requisição para salvar/remover vídeo da galeria - VideoId: {}", videoId);
+
+            User user = getAuthenticatedUser();
+            VideoDTO video = videoService.toggleSaveInGallery(videoId);
+
+            log.info("✅ Vídeo {} {} galeria",
+                    video.getSavedInGallery() ? "salvo na" : "removido da",
+                    video.getSavedInGallery() ? "" : "");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", video.getSavedInGallery() ? "Vídeo salvo na galeria" : "Vídeo removido da galeria",
+                    "video", video
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao salvar/remover vídeo da galeria - Erro: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                     "success", false,
                     "message", e.getMessage()

@@ -21,14 +21,15 @@ public class WebhookService {
 
     private final MessageService messageService;
     private final AudioService audioService;
-    private final PhotoService photoService; // ✅ ADICIONAR ESTA LINHA
+    private final PhotoService photoService;
+    private final VideoService videoService;
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
     private final NotificationService notificationService;
 
     /**
      * ✅ MODIFICADO: Método unificado para processar QUALQUER mensagem
-     * - Suporta texto, áudio e fotos
+     * - Suporta texto, áudio, fotos e vídeos
      * - Reseta contador quando fromMe=true (mensagem enviada fora do sistema)
      * - Incrementa contador quando fromMe=false (mensagem recebida)
      * - Atualiza lastMessageContent SEMPRE
@@ -74,6 +75,18 @@ public class WebhookService {
             if (audioObj != null) {
                 // ✅ PROCESSAR ÁUDIO
                 processAudio(payload, audioObj, fromMe, momment, connectedPhone, phone,
+                        instanceId, messageId, chatName, senderName, status,
+                        senderPhoto, isForwarded, isGroup);
+                return;
+            }
+
+            // ✅ NOVO: Verificar se é vídeo
+            @SuppressWarnings("unchecked")
+            Map<String, Object> videoObj = (Map<String, Object>) payload.get("video");
+
+            if (videoObj != null) {
+                // ✅ PROCESSAR VÍDEO
+                processVideo(payload, videoObj, fromMe, momment, connectedPhone, phone,
                         instanceId, messageId, chatName, senderName, status,
                         senderPhoto, isForwarded, isGroup);
                 return;
@@ -440,6 +453,124 @@ public class WebhookService {
 
         } catch (Exception e) {
             log.error("❌ Erro ao processar áudio", e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Processar vídeo recebido via webhook
+     */
+    @Transactional
+    public void processVideo(Map<String, Object> payload, Map<String, Object> videoObj,
+                             Boolean fromMe, Long momment, String connectedPhone, String phone,
+                             String instanceId, String messageId, String chatName, String senderName,
+                             String status, String senderPhoto, Boolean isForwarded, Boolean isGroup) {
+        try {
+            log.info("🎥 Processando vídeo do webhook");
+
+            // ===== EXTRAIR DADOS DO VÍDEO =====
+            String videoUrl = (String) videoObj.get("videoUrl");
+            String caption = (String) videoObj.get("caption");
+            Integer width = videoObj.get("width") != null ? ((Number) videoObj.get("width")).intValue() : 0;
+            Integer height = videoObj.get("height") != null ? ((Number) videoObj.get("height")).intValue() : 0;
+            Integer seconds = videoObj.get("seconds") != null ? ((Number) videoObj.get("seconds")).intValue() : 0;
+            String mimeType = (String) videoObj.get("mimeType");
+            Boolean viewOnce = (Boolean) videoObj.get("viewOnce");
+            Boolean isGif = (Boolean) videoObj.get("isGif");
+            Boolean isStatusReply = (Boolean) payload.get("isStatusReply");
+            Boolean isEdit = (Boolean) payload.get("isEdit");
+            Boolean isNewsletter = (Boolean) payload.get("isNewsletter");
+
+            log.info("🎥 Dados do vídeo - VideoUrl: {}, Width: {}, Height: {}, Seconds: {}, Caption: {}",
+                    videoUrl != null ? "presente" : "null", width, height, seconds, caption != null ? "presente" : "null");
+
+            // ===== BUSCAR INSTÂNCIA =====
+            Optional<WebInstance> instanceOpt = Optional.empty();
+
+            if (instanceId != null && !instanceId.trim().isEmpty()) {
+                instanceOpt = webInstanceRepository.findBySuaInstancia(instanceId);
+            }
+
+            if (instanceOpt.isEmpty() && connectedPhone != null) {
+                instanceOpt = webInstanceRepository.findByConnectedPhone(connectedPhone);
+            }
+
+            if (instanceOpt.isEmpty()) {
+                log.warn("⚠️ WebInstance não encontrada para vídeo");
+                return;
+            }
+
+            WebInstance instance = instanceOpt.get();
+
+            // ===== BUSCAR OU CRIAR CHAT =====
+            Optional<Chat> chatOpt = chatRepository.findByWebInstanceIdAndPhone(instance.getId(), phone);
+            Chat chat;
+            boolean isNewChat = false;
+
+            if (chatOpt.isEmpty()) {
+                chat = new Chat();
+                chat.setWebInstance(instance);
+                chat.setPhone(phone);
+                chat.setName(chatName != null ? chatName : phone);
+                chat.setIsGroup(isGroup != null ? isGroup : false);
+                chat.setUnread(fromMe ? 0 : 1);
+                chat.setColumn("inbox");
+                chat.setProfileThumbnail(senderPhoto);
+                chat.setLastMessageContent("Vídeo 🎥");
+                chat = chatRepository.save(chat);
+                isNewChat = true;
+                log.info("✅ Novo chat criado para vídeo - ID: {}", chat.getId());
+            } else {
+                chat = chatOpt.get();
+                int previousUnread = chat.getUnread();
+
+                if (chatName != null && !chatName.equals(chat.getName())) {
+                    chat.setName(chatName);
+                }
+
+                if (senderPhoto != null && !senderPhoto.isEmpty()) {
+                    chat.setProfileThumbnail(senderPhoto);
+                }
+
+                chat.setLastMessageContent("Vídeo 🎥");
+
+                if (fromMe) {
+                    chat.setUnread(0);
+                    log.info("📤 Vídeo enviado - Resetando contador (unread: {} → 0)", previousUnread);
+                } else {
+                    chat.setUnread(chat.getUnread() + 1);
+                    log.info("📥 Vídeo recebido - Incrementando contador (unread: {} → {})",
+                            previousUnread, chat.getUnread());
+                }
+
+                chat = chatRepository.save(chat);
+            }
+
+            // ===== SALVAR VÍDEO =====
+            videoService.saveIncomingVideo(
+                    chat.getId(), messageId, instanceId, phone, fromMe, momment,
+                    videoUrl, caption, width, height, seconds, mimeType, viewOnce, isGif,
+                    isStatusReply, isEdit, isGroup, isNewsletter, isForwarded,
+                    chatName, senderName, status
+            );
+
+            // ===== ATUALIZAR lastMessageTime =====
+            chat.setLastMessageTime(LocalDateTime.ofInstant(
+                    java.time.Instant.ofEpochMilli(momment),
+                    java.time.ZoneId.systemDefault()
+            ));
+            chat = chatRepository.save(chat);
+
+            log.info("✅ Vídeo processado com sucesso - MessageId: {}, Chat: {}", messageId, chat.getId());
+
+            // ===== ENVIAR NOTIFICAÇÃO SSE =====
+            if (!fromMe) {
+                sendNotificationToUser(instance.getUser().getId(), chat, chat.getLastMessageContent(), isNewChat);
+            } else {
+                sendChatUpdateToUser(instance.getUser().getId(), chat);
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao processar vídeo", e);
         }
     }
 

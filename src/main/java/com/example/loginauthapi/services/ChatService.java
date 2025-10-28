@@ -14,6 +14,7 @@ import com.example.loginauthapi.repositories.ChatRepository;
 import com.example.loginauthapi.repositories.MessageRepository;
 import com.example.loginauthapi.repositories.AudioRepository;
 import com.example.loginauthapi.repositories.PhotoRepository;
+import com.example.loginauthapi.repositories.VideoRepository;
 import com.example.loginauthapi.repositories.TagRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.zapi.ZapiChatService;
@@ -44,6 +45,7 @@ public class ChatService {
     private final MessageRepository messageRepository;
     private final AudioRepository audioRepository;
     private final PhotoRepository photoRepository;
+    private final VideoRepository videoRepository;
 
     // Armazenar progresso do carregamento por userId
     private final ConcurrentHashMap<String, LoadingProgress> loadingProgressMap = new ConcurrentHashMap<>();
@@ -96,7 +98,7 @@ public class ChatService {
 
     /**
      * ✅ MODIFICADO: Sincronizar lastMessageContent apenas de chats ATIVOS
-     * Busca a última mensagem de cada chat ativo (texto, áudio OU foto) e atualiza o campo lastMessageContent
+     * Busca a última mensagem de cada chat ativo (texto, áudio, foto OU vídeo) e atualiza o campo lastMessageContent
      */
     @Transactional
     public void syncLastMessageContent(String webInstanceId) {
@@ -119,10 +121,15 @@ public class ChatService {
                 Optional<com.example.loginauthapi.entities.Photo> lastPhoto =
                         photoRepository.findTopByChatIdOrderByTimestampDesc(chat.getId());
 
-                // Determinar qual é mais recente (mensagem de texto, áudio ou foto)
+                // ✅ BUSCAR ÚLTIMO VÍDEO
+                Optional<com.example.loginauthapi.entities.Video> lastVideo =
+                        videoRepository.findTopByChatIdOrderByTimestampDesc(chat.getId());
+
+                // Determinar qual é mais recente (mensagem de texto, áudio, foto ou vídeo)
                 LocalDateTime lastMessageTime = lastMessage.map(Message::getTimestamp).orElse(null);
                 LocalDateTime lastAudioTime = lastAudio.map(com.example.loginauthapi.entities.Audio::getTimestamp).orElse(null);
                 LocalDateTime lastPhotoTime = lastPhoto.map(com.example.loginauthapi.entities.Photo::getTimestamp).orElse(null);
+                LocalDateTime lastVideoTime = lastVideo.map(com.example.loginauthapi.entities.Video::getTimestamp).orElse(null);
 
                 String content = null;
 
@@ -145,8 +152,15 @@ public class ChatService {
                     mostRecentType = "photo";
                 }
 
+                if (lastVideoTime != null && (mostRecent == null || lastVideoTime.isAfter(mostRecent))) {
+                    mostRecent = lastVideoTime;
+                    mostRecentType = "video";
+                }
+
                 // Definir conteúdo baseado no tipo mais recente
-                if ("photo".equals(mostRecentType)) {
+                if ("video".equals(mostRecentType)) {
+                    content = "Vídeo 🎥";
+                } else if ("photo".equals(mostRecentType)) {
                     content = "Foto 📸";
                 } else if ("audio".equals(mostRecentType)) {
                     content = "Mensagem de Áudio";
