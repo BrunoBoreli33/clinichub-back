@@ -25,13 +25,9 @@ jobs:
           java-version: 17
           cache: maven
 
-      - name: Build app (skip tests on PRs)
+      - name: Build app
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            mvn -B -DskipTests=true clean package -Dspring.profiles.active=ci
-          else
-            mvn -B clean package -Dspring.profiles.active=ci
-          fi
+          mvn clean install
 
       - name: Log into GHCR
         uses: docker/login-action@v2
