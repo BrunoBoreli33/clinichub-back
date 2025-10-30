@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -134,7 +135,7 @@ public class VideoService {
      * Marcar/desmarcar vídeo como salvo na galeria
      */
     @Transactional
-    public VideoDTO toggleSaveInGallery(String videoId) {
+    public VideoDTO toggleVideoInGallery(String videoId) {
         Video video = videoRepository.findById(videoId)
                 .orElseThrow(() -> new RuntimeException("Vídeo não encontrado"));
 
@@ -146,6 +147,91 @@ public class VideoService {
                 video.getSavedInGallery() ? "para" : "da");
 
         return convertToDTO(updated);
+    }
+
+    /**
+     * ✅ CORRIGIDO: Salvar vídeo enviado (outgoing) antes de enviar via Z-API
+     * Se videoId for fornecido, copia todas as informações do vídeo original
+     */
+    @Transactional
+    public VideoDTO saveOutgoingVideo(String chatId, String phone, String videoUrl, String instanceId, String videoId) {
+        try {
+            Chat chat = chatRepository.findById(chatId)
+                    .orElseThrow(() -> new RuntimeException("Chat não encontrado: " + chatId));
+
+            // Gerar messageId temporário
+            String tempMessageId = "temp_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString();
+
+            Video video = new Video();
+            video.setMessageId(tempMessageId);
+            video.setChat(chat);
+            video.setVideoUrl(videoUrl);
+            video.setTimestamp(LocalDateTime.now());
+            video.setFromMe(true);
+            video.setStatus("PENDING");
+            video.setSenderName(chat.getName());
+            video.setSavedInGallery(false);
+            video.setPhone(phone);
+            video.setInstanceId(instanceId);
+
+            // ✅ Se videoId fornecido, copiar informações do vídeo original
+            if (videoId != null && !videoId.isEmpty()) {
+                Optional<Video> originalVideo = videoRepository.findById(videoId);
+                if (originalVideo.isPresent()) {
+                    Video original = originalVideo.get();
+                    video.setWidth(original.getWidth());
+                    video.setHeight(original.getHeight());
+                    video.setSeconds(original.getSeconds());
+                    video.setMimeType(original.getMimeType());
+                    video.setViewOnce(original.getViewOnce());
+                    video.setIsGif(original.getIsGif());
+                    // NÃO copiar caption - conforme especificado
+                    video.setCaption(null);
+                    log.info("✅ Copiando informações do vídeo original - VideoId: {}, Width: {}, Height: {}, Seconds: {}",
+                            videoId, original.getWidth(), original.getHeight(), original.getSeconds());
+                } else {
+                    log.warn("⚠️ Vídeo original não encontrado: {}, usando valores padrão", videoId);
+                    video.setCaption(null);
+                    video.setWidth(0);
+                    video.setHeight(0);
+                    video.setSeconds(0);
+                }
+            } else {
+                // Valores placeholder se não houver videoId
+                video.setCaption(null);
+                video.setWidth(0);
+                video.setHeight(0);
+                video.setSeconds(0);
+            }
+
+            video = videoRepository.save(video);
+            log.info("✅ Vídeo outgoing salvo temporariamente - MessageId: {}, InstanceId: {}", tempMessageId, instanceId);
+
+            return convertToDTO(video);
+        } catch (Exception e) {
+            log.error("❌ Erro ao salvar vídeo outgoing", e);
+            throw new RuntimeException("Erro ao salvar vídeo outgoing: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Atualizar messageId do vídeo após envio via Z-API
+     */
+    @Transactional
+    public void updateVideoIdAfterSend(String tempMessageId, String realMessageId, String status) {
+        try {
+            Video video = videoRepository.findByMessageId(tempMessageId)
+                    .orElseThrow(() -> new RuntimeException("Vídeo não encontrado: " + tempMessageId));
+
+            video.setMessageId(realMessageId);
+            video.setStatus(status);
+            videoRepository.save(video);
+
+            log.info("✅ Vídeo atualizado com messageId real: {} -> {}", tempMessageId, realMessageId);
+        } catch (Exception e) {
+            log.error("❌ Erro ao atualizar video após envio", e);
+            throw new RuntimeException("Erro ao atualizar video: " + e.getMessage(), e);
+        }
     }
 
     /**

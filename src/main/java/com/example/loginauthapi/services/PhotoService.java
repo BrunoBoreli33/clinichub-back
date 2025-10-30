@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -131,7 +132,7 @@ public class PhotoService {
      * Marcar/desmarcar foto como salva na galeria
      */
     @Transactional
-    public PhotoDTO toggleSaveInGallery(String photoId) {
+    public PhotoDTO togglePhotoInGallery(String photoId) {
         Photo photo = photoRepository.findById(photoId)
                 .orElseThrow(() -> new RuntimeException("Foto não encontrada"));
 
@@ -143,6 +144,86 @@ public class PhotoService {
                 photo.getSavedInGallery() ? "para" : "da");
 
         return convertToDTO(updated);
+    }
+
+    /**
+     * ✅ CORRIGIDO: Salvar foto enviada (outgoing) antes de enviar via Z-API
+     * Se photoId for fornecido, copia todas as informações da foto original
+     */
+    @Transactional
+    public PhotoDTO saveOutgoingPhoto(String chatId, String phone, String imageUrl, String instanceId, String photoId) {
+        try {
+            Chat chat = chatRepository.findById(chatId)
+                    .orElseThrow(() -> new RuntimeException("Chat não encontrado: " + chatId));
+
+            // Gerar messageId temporário
+            String tempMessageId = "temp_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString();
+
+            Photo photo = new Photo();
+            photo.setMessageId(tempMessageId);
+            photo.setChat(chat);
+            photo.setImageUrl(imageUrl);
+            photo.setTimestamp(LocalDateTime.now());
+            photo.setFromMe(true);
+            photo.setStatus("PENDING");
+            photo.setSenderName(chat.getName());
+            photo.setSavedInGallery(false);
+            photo.setPhone(phone);
+            photo.setInstanceId(instanceId);
+
+            // ✅ Se photoId fornecido, copiar informações da foto original
+            if (photoId != null && !photoId.isEmpty()) {
+                Optional<Photo> originalPhoto = photoRepository.findById(photoId);
+                if (originalPhoto.isPresent()) {
+                    Photo original = originalPhoto.get();
+                    photo.setWidth(original.getWidth());
+                    photo.setHeight(original.getHeight());
+                    photo.setMimeType(original.getMimeType());
+                    // NÃO copiar caption - conforme especificado
+                    photo.setCaption(null);
+                    log.info("✅ Copiando informações da foto original - PhotoId: {}, Width: {}, Height: {}",
+                            photoId, original.getWidth(), original.getHeight());
+                } else {
+                    log.warn("⚠️ Foto original não encontrada: {}, usando valores padrão", photoId);
+                    photo.setCaption(null);
+                    photo.setWidth(0);
+                    photo.setHeight(0);
+                }
+            } else {
+                // Valores placeholder se não houver photoId
+                photo.setCaption(null);
+                photo.setWidth(0);
+                photo.setHeight(0);
+            }
+
+            photo = photoRepository.save(photo);
+            log.info("✅ Foto outgoing salva temporariamente - MessageId: {}, InstanceId: {}", tempMessageId, instanceId);
+
+            return convertToDTO(photo);
+        } catch (Exception e) {
+            log.error("❌ Erro ao salvar foto outgoing", e);
+            throw new RuntimeException("Erro ao salvar foto outgoing: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Atualizar messageId da foto após envio via Z-API
+     */
+    @Transactional
+    public void updatePhotoIdAfterSend(String tempMessageId, String realMessageId, String status) {
+        try {
+            Photo photo = photoRepository.findByMessageId(tempMessageId)
+                    .orElseThrow(() -> new RuntimeException("Foto não encontrada: " + tempMessageId));
+
+            photo.setMessageId(realMessageId);
+            photo.setStatus(status);
+            photoRepository.save(photo);
+
+            log.info("✅ Foto atualizada com messageId real: {} -> {}", tempMessageId, realMessageId);
+        } catch (Exception e) {
+            log.error("❌ Erro ao atualizar photo após envio", e);
+            throw new RuntimeException("Erro ao atualizar photo: " + e.getMessage(), e);
+        }
     }
 
     /**
