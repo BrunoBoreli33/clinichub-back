@@ -78,7 +78,8 @@ public class SecurityFilter extends OncePerRequestFilter {
      * Verifica se o endpoint é público e não requer autenticação
      */
     private boolean isPublicEndpoint(String path) {
-        return path.startsWith("/webhook/") ||
+        return  path.startsWith("/actuator/") ||
+                path.startsWith("/webhook/") ||
                 path.startsWith("/auth/login") ||
                 path.startsWith("/auth/register") ||
                 path.startsWith("/auth/confirm") ||
