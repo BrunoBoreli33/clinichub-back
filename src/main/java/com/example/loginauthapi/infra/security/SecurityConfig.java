@@ -37,10 +37,17 @@ public class SecurityConfig {
                 .requiresChannel(channel -> channel.anyRequest().requiresInsecure())
                 .authorizeHttpRequests(authorize -> authorize
                         // Endpoints públicos
-                        .requestMatchers("/actuator/**").permitAll()
-                        .requestMatchers( "/auth/login").permitAll()
-                        .requestMatchers( "/auth/register").permitAll()
-                        .requestMatchers( "/auth/confirm").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/auth/register").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/auth/confirm").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/auth/refresh").permitAll()
+
+                        // Endpoints públicos de recuperação de senha
+                        .requestMatchers(HttpMethod.POST, "/auth/forgot-password").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/auth/verify-reset-code").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/auth/reset-password").permitAll()
+
+                        // Outros endpoints
                         .requestMatchers("/api/profile/**").authenticated()
                         .requestMatchers("/webhook/**").permitAll()
                         .requestMatchers("/auth/refresh").permitAll()

@@ -5,6 +5,7 @@ import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.infra.security.TokenService;
 import com.example.loginauthapi.repositories.UserRepository;
 import com.example.loginauthapi.services.EmailService;
+import com.example.loginauthapi.services.PasswordResetService;
 import com.example.loginauthapi.services.TempUserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ public class AuthController {
     private final TokenService tokenService;
     private final TempUserService tempUserService;
     private final EmailService emailService;
+    private final PasswordResetService passwordResetService;
 
     @PostMapping("/login")
     @Transactional
@@ -184,4 +186,123 @@ public class AuthController {
         }
     }
 
+    /**
+     * Endpoint para solicitar recuperação de senha
+     * Envia código de 6 dígitos para o email do usuário
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<?> forgotPassword(@RequestBody @Valid ForgotPasswordRequestDTO body) {
+        Optional<User> optionalUser = repository.findByEmail(body.email());
+
+        if (optionalUser.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of(
+                            "success", false,
+                            "message", "E-mail não cadastrado"
+                    ));
+        }
+
+        String code = passwordResetService.createPasswordReset(body.email());
+
+        try {
+            emailService.sendPasswordResetCode(body.email(), code);
+        } catch (Exception e) {
+            passwordResetService.removePasswordReset(body.email());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of(
+                            "success", false,
+                            "message", "Erro ao enviar e-mail. Tente novamente."
+                    ));
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Código de recuperação enviado para o seu e-mail",
+                "email", body.email()
+        ));
+    }
+
+    /**
+     * Endpoint para verificar o código de recuperação
+     * Máximo de 3 tentativas
+     */
+    @PostMapping("/verify-reset-code")
+    public ResponseEntity<?> verifyResetCode(@RequestBody @Valid VerifyResetCodeDTO body) {
+        PasswordResetService.PasswordReset reset = passwordResetService.getPasswordReset(body.email());
+
+        if (reset == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of(
+                            "success", false,
+                            "message", "Nenhuma solicitação encontrada ou código expirado"
+                    ));
+        }
+
+        if (!passwordResetService.verifyCode(body.email(), body.code())) {
+            int remainingAttempts = 3 - reset.getAttempts();
+
+            if (remainingAttempts <= 0) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(Map.of(
+                                "success", false,
+                                "message", "Limite de tentativas excedido. Solicite um novo código."
+                        ));
+            }
+
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of(
+                            "success", false,
+                            "message", "Código inválido. Você tem " + remainingAttempts + " tentativa(s) restante(s)."
+                    ));
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Código verificado com sucesso"
+        ));
+    }
+
+    /**
+     * Endpoint para resetar a senha
+     * Só funciona se o código foi verificado anteriormente
+     */
+    @PostMapping("/reset-password")
+    @Transactional
+    public ResponseEntity<?> resetPassword(@RequestBody @Valid ResetPasswordDTO body) {
+        if (!passwordResetService.isVerified(body.email())) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of(
+                            "success", false,
+                            "message", "Código não verificado ou expirado. Solicite um novo código."
+                    ));
+        }
+
+        Optional<User> optionalUser = repository.findByEmail(body.email());
+
+        if (optionalUser.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of(
+                            "success", false,
+                            "message", "Usuário não encontrado"
+                    ));
+        }
+
+        User user = optionalUser.get();
+        user.setPassword(passwordEncoder.encode(body.newPassword()));
+        repository.save(user);
+
+        passwordResetService.removePasswordReset(body.email());
+
+        try {
+            emailService.sendPasswordChangedConfirmation(body.email());
+        } catch (Exception e) {
+            // Log do erro mas não falha a requisição
+            System.err.println("Erro ao enviar email de confirmação: " + e.getMessage());
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Senha alterada com sucesso"
+        ));
+    }
 }
