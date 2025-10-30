@@ -2,11 +2,15 @@ package com.example.loginauthapi.controllers;
 
 import com.example.loginauthapi.dto.AudioDTO;
 import com.example.loginauthapi.dto.MessageDTO;
+import com.example.loginauthapi.dto.PhotoDTO;
+import com.example.loginauthapi.dto.VideoDTO;
 import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.AudioService;
 import com.example.loginauthapi.services.MessageService;
+import com.example.loginauthapi.services.PhotoService;
+import com.example.loginauthapi.services.VideoService;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +30,9 @@ import java.util.Map;
 public class MessageController {
 
     private final MessageService messageService;
-    private final AudioService audioService; // ✅ ADICIONADO
+    private final AudioService audioService;
+    private final PhotoService photoService;
+    private final VideoService videoService;
     private final ZapiMessageService zapiMessageService;
     private final WebInstanceRepository webInstanceRepository;
 
@@ -71,7 +77,7 @@ public class MessageController {
 
     /**
      * ✅ MODIFICADO: GET /dashboard/messages/{chatId}
-     * Buscar mensagens E áudios de um chat
+     * Buscar mensagens, áudios, fotos E vídeos de um chat
      */
     @GetMapping("/{chatId}")
     public ResponseEntity<Map<String, Object>> getMessages(@PathVariable String chatId) {
@@ -81,17 +87,28 @@ public class MessageController {
             User user = getAuthenticatedUser();
             List<MessageDTO> messages = messageService.getMessagesByChatId(chatId, user);
 
-            // ✅ ADICIONADO: Buscar áudios também
+            // ✅ Buscar áudios
             List<AudioDTO> audios = audioService.getAudiosByChatId(chatId);
 
-            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}", messages.size(), audios.size());
+            // ✅ Buscar fotos
+            List<PhotoDTO> photos = photoService.getPhotosByChatId(chatId);
+
+            // ✅ Buscar vídeos
+            List<VideoDTO> videos = videoService.getVideosByChatId(chatId);
+
+            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}, Fotos: {}, Vídeos: {}",
+                    messages.size(), audios.size(), photos.size(), videos.size());
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
                     "messages", messages,
-                    "audios", audios, // ✅ ADICIONADO
+                    "audios", audios,
+                    "photos", photos,
+                    "videos", videos,
                     "totalMessages", messages.size(),
-                    "totalAudios", audios.size() // ✅ ADICIONADO
+                    "totalAudios", audios.size(),
+                    "totalPhotos", photos.size(),
+                    "totalVideos", videos.size()
             ));
         } catch (Exception e) {
             log.error("❌ Erro ao buscar mensagens - ChatId: {}, Erro: {}", chatId, e.getMessage(), e);
@@ -103,7 +120,122 @@ public class MessageController {
     }
 
     /**
-     * ✅ MODIFICADO: POST /dashboard/messages/send
+     * ✅ NOVO: GET /dashboard/messages/gallery
+     * Buscar fotos salvas na galeria do usuário
+     */
+    @GetMapping("/gallery")
+    public ResponseEntity<Map<String, Object>> getGalleryPhotos() {
+        try {
+            log.info("🖼️ Requisição para buscar fotos da galeria");
+
+            User user = getAuthenticatedUser();
+            List<PhotoDTO> photos = photoService.getSavedGalleryPhotos(user.getId());
+
+            log.info("✅ Fotos da galeria carregadas - Total: {}", photos.size());
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "photos", photos,
+                    "total", photos.size()
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar galeria - Erro: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * ✅ NOVO: GET /dashboard/messages/gallery/all
+     * Buscar fotos e vídeos salvos na galeria do usuário
+     */
+    @GetMapping("/gallery/all")
+    public ResponseEntity<Map<String, Object>> getGalleryAll() {
+        try {
+            log.info("🖼️ Requisição para buscar galeria completa (fotos + vídeos)");
+
+            User user = getAuthenticatedUser();
+            List<PhotoDTO> photos = photoService.getSavedGalleryPhotos(user.getId());
+            List<VideoDTO> videos = videoService.getSavedGalleryVideos(user.getId());
+
+            log.info("✅ Galeria carregada - Fotos: {}, Vídeos: {}", photos.size(), videos.size());
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "photos", photos,
+                    "videos", videos,
+                    "totalPhotos", photos.size(),
+                    "totalVideos", videos.size()
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar galeria - Erro: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * ✅ NOVO: PUT /dashboard/messages/photos/{photoId}/toggle-gallery
+     * Marcar/desmarcar foto como salva na galeria
+     */
+    @PutMapping("/photos/{photoId}/toggle-gallery")
+    public ResponseEntity<Map<String, Object>> togglePhotoInGallery(@PathVariable String photoId) {
+        try {
+            log.info("🖼️ Requisição para salvar/remover foto da galeria - PhotoId: {}", photoId);
+
+            PhotoDTO photo = photoService.togglePhotoInGallery(photoId);
+
+            log.info("✅ Foto {} da galeria com sucesso",
+                    photo.getSavedInGallery() ? "salva na" : "removida da");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", photo.getSavedInGallery() ? "Foto salva na galeria" : "Foto removida da galeria",
+                    "photo", photo
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao salvar/remover foto da galeria - Erro: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * ✅ NOVO: PUT /dashboard/messages/videos/{videoId}/toggle-gallery
+     * Marcar/desmarcar vídeo como salvo na galeria
+     */
+    @PutMapping("/videos/{videoId}/toggle-gallery")
+    public ResponseEntity<Map<String, Object>> toggleVideoInGallery(@PathVariable String videoId) {
+        try {
+            log.info("🎥 Requisição para salvar/remover vídeo da galeria - VideoId: {}", videoId);
+
+            VideoDTO video = videoService.toggleVideoInGallery(videoId);
+
+            log.info("✅ Vídeo {} da galeria com sucesso",
+                    video.getSavedInGallery() ? "salvo na" : "removido da");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", video.getSavedInGallery() ? "Vídeo salvo na galeria" : "Vídeo removido da galeria",
+                    "video", video
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao salvar/remover vídeo da galeria - Erro: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * POST /dashboard/messages/send
      * Enviar mensagem (salva ANTES de enviar)
      */
     @PostMapping("/send")
@@ -181,7 +313,7 @@ public class MessageController {
     }
 
     /**
-     * ✅ MODIFICADO: POST /dashboard/messages/send-audio
+     * POST /dashboard/messages/send-audio
      * Enviar mensagem de áudio (usando AudioService ao invés de MessageService)
      */
     @PostMapping("/send-audio")
@@ -252,6 +384,126 @@ public class MessageController {
     }
 
     /**
+     * POST /dashboard/messages/send-image
+     * Enviar imagem
+     */
+    @PostMapping("/send-image")
+    public ResponseEntity<Map<String, Object>> sendImage(@RequestBody Map<String, Object> body) {
+        try {
+            log.info("📷 Requisição para enviar imagem");
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            String chatId = (String) body.get("chatId");
+            String phone = (String) body.get("phone");
+            String image = (String) body.get("image");
+            String photoId = (String) body.get("photoId"); // ✅ Receber photoId
+
+            if (chatId == null || phone == null || image == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "ChatId, phone e image são obrigatórios"
+                ));
+            }
+
+            // ✅ PASSO 1: Salvar foto no banco antes de enviar
+            log.info("💾 Salvando foto no banco antes de enviar");
+            PhotoDTO savedPhoto = photoService.saveOutgoingPhoto(chatId, phone, image, instance.getId(), photoId);
+
+            // ✅ PASSO 2: Enviar via Z-API (SEM CAPTION)
+            log.info("📨 Enviando imagem via Z-API - Phone: {}", phone);
+            Map<String, Object> zapiResult = zapiMessageService.sendImage(
+                    instance, phone, image
+            );
+
+            // ✅ PASSO 3: Atualizar com messageId real
+            if (zapiResult != null && zapiResult.containsKey("messageId")) {
+                String realMessageId = (String) zapiResult.get("messageId");
+                photoService.updatePhotoIdAfterSend(
+                        savedPhoto.getMessageId(), realMessageId, "SENT"
+                );
+                savedPhoto.setMessageId(realMessageId);
+                savedPhoto.setStatus("SENT");
+            }
+
+            log.info("✅ Imagem enviada e salva com sucesso");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Imagem enviada com sucesso",
+                    "data", savedPhoto
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar imagem: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao enviar imagem: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * POST /dashboard/messages/send-video
+     * Enviar vídeo
+     */
+    @PostMapping("/send-video")
+    public ResponseEntity<Map<String, Object>> sendVideo(@RequestBody Map<String, Object> body) {
+        try {
+            log.info("🎥 Requisição para enviar vídeo");
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            String chatId = (String) body.get("chatId");
+            String phone = (String) body.get("phone");
+            String video = (String) body.get("video");
+            String videoId = (String) body.get("videoId"); // ✅ Receber videoId
+
+            if (chatId == null || phone == null || video == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "ChatId, phone e video são obrigatórios"
+                ));
+            }
+
+            // ✅ PASSO 1: Salvar vídeo no banco antes de enviar
+            log.info("💾 Salvando vídeo no banco antes de enviar");
+            VideoDTO savedVideo = videoService.saveOutgoingVideo(chatId, phone, video, instance.getId(), videoId);
+
+            // ✅ PASSO 2: Enviar via Z-API (SEM CAPTION)
+            log.info("📨 Enviando vídeo via Z-API - Phone: {}", phone);
+            Map<String, Object> zapiResult = zapiMessageService.sendVideo(
+                    instance, phone, video
+            );
+
+            // ✅ PASSO 3: Atualizar com messageId real
+            if (zapiResult != null && zapiResult.containsKey("messageId")) {
+                String realMessageId = (String) zapiResult.get("messageId");
+                videoService.updateVideoIdAfterSend(
+                        savedVideo.getMessageId(), realMessageId, "SENT"
+                );
+                savedVideo.setMessageId(realMessageId);
+                savedVideo.setStatus("SENT");
+            }
+
+            log.info("✅ Vídeo enviado e salvo com sucesso");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Vídeo enviado com sucesso",
+                    "data", savedVideo
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar vídeo: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao enviar vídeo: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
      * PUT /dashboard/messages/edit
      * Editar mensagem
      */
@@ -276,7 +528,7 @@ public class MessageController {
                 ));
             }
 
-            log.info("🔍 Editando mensagem via Z-API - MessageId: {}", editMessageId);
+            log.info("📝 Editando mensagem via Z-API - MessageId: {}", editMessageId);
 
             Map<String, Object> result = zapiMessageService.editMessage(
                     instance, phone, editMessageId, newMessage

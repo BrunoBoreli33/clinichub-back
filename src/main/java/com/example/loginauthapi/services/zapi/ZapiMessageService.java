@@ -107,6 +107,92 @@ public class ZapiMessageService {
     }
 
     /**
+     * ✅ NOVO: Enviar imagem via Z-API
+     */
+    public Map<String, Object> sendImage(WebInstance instance, String phone, String image) {
+        try {
+            String url = String.format("%s/instances/%s/token/%s/send-image",
+                    ZAPI_BASE_URL,
+                    instance.getSuaInstancia(),
+                    instance.getSeuToken());
+
+            log.info("📷 Enviando imagem para: {}", phone);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Client-Token", instance.getClientToken());
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("phone", phone);
+            body.put("image", image);
+            body.put("viewOnce", false);
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    Map.class
+            );
+
+            Map<String, Object> result = response.getBody();
+            log.info("✅ Imagem enviada com sucesso - MessageId: {}",
+                    result != null ? result.get("messageId") : "N/A");
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar imagem", e);
+            throw new RuntimeException("Erro ao enviar imagem via Z-API: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Enviar vídeo via Z-API
+     */
+    public Map<String, Object> sendVideo(WebInstance instance, String phone, String video) {
+        try {
+            String url = String.format("%s/instances/%s/token/%s/send-video",
+                    ZAPI_BASE_URL,
+                    instance.getSuaInstancia(),
+                    instance.getSeuToken());
+
+            log.info("🎥 Enviando vídeo para: {}", phone);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Client-Token", instance.getClientToken());
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("phone", phone);
+            body.put("video", video);
+            body.put("viewOnce", false);
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    Map.class
+            );
+
+            Map<String, Object> result = response.getBody();
+            log.info("✅ Vídeo enviado com sucesso - MessageId: {}",
+                    result != null ? result.get("messageId") : "N/A");
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar vídeo", e);
+            throw new RuntimeException("Erro ao enviar vídeo via Z-API: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Editar mensagem via Z-API
      */
     public Map<String, Object> editMessage(WebInstance instance, String phone,
