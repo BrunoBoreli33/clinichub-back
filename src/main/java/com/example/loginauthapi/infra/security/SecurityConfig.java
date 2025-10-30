@@ -37,13 +37,13 @@ public class SecurityConfig {
                 .requiresChannel(channel -> channel.anyRequest().requiresInsecure())
                 .authorizeHttpRequests(authorize -> authorize
                         // Endpoints públicos
-                        .requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/auth/register").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/auth/confirm").permitAll()
+                        .requestMatchers("/actuator/**").permitAll()
+                        .requestMatchers( "/auth/login").permitAll()
+                        .requestMatchers( "/auth/register").permitAll()
+                        .requestMatchers( "/auth/confirm").permitAll()
                         .requestMatchers("/api/profile/**").authenticated()
                         .requestMatchers("/webhook/**").permitAll()
-                        .requestMatchers(HttpMethod.OPTIONS, "/webhook/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/auth/refresh").permitAll()
+                        .requestMatchers("/auth/refresh").permitAll()
 
                         // ✅ NOVO: Endpoint SSE de notificações (autenticado)
                         .requestMatchers("/api/notifications/stream").authenticated()
