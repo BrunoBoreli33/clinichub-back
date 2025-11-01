@@ -30,6 +30,9 @@ public class RoutineAutomationService {
     // Serviço para enviar mensagens via WhatsApp (Z-API)
     private final ZapiMessageService zapiMessageService;
 
+    // ✅ NOVO: Serviço para enviar notificações SSE
+    private final NotificationService notificationService;
+
     // Nomes das colunas/categorias onde os chats podem estar
     private static final String REPESCAGEM_COLUMN = "followup"; // Coluna de acompanhamento automático
     private static final String LEAD_FRIO_COLUMN = "cold_lead"; // Coluna de leads frios (sem resposta)
@@ -179,7 +182,7 @@ public class RoutineAutomationService {
                 chatRoutineStateRepository.save(state);
 
                 // Move direto para Lead Frio
-                moveToLeadFrio(chat, state);
+                moveToLeadFrio(chat, state, user);
                 return;
             }
 
@@ -196,7 +199,7 @@ public class RoutineAutomationService {
                 chatRoutineStateRepository.save(state);
 
                 // Move direto para Lead Frio
-                moveToLeadFrio(chat, state);
+                moveToLeadFrio(chat, state, user);
                 return;
             }
 
@@ -232,31 +235,31 @@ public class RoutineAutomationService {
 
             // Se não tem instância ativa, não pode enviar mensagem
             if (webInstanceOpt.isEmpty()) {
-                log.error("❌ [CHAT: {}] Usuário {} não possui WebInstance ativa", chat.getId(), user.getId());
+                log.error("❌ [CHAT: {}] Usuário {} sem instância ativa", chat.getId(), user.getId());
                 return;
             }
 
             WebInstance webInstance = webInstanceOpt.get();
 
-            // Envia a mensagem da rotina via Z-API (WhatsApp)
+            // ATUALIZAÇÃO DO TEMPO DE ENVIO ANTES DA TENTATIVA DO Z-API
+            state.setLastAutomatedMessageSent(LocalDateTime.now());
+            chatRoutineStateRepository.save(state);
+
+            // Envia a mensagem via Z-API (WhatsApp)
             Map<String, Object> result = zapiMessageService.sendTextMessage(
                     webInstance,
                     chat.getPhone(),
                     routineToSend.getTextContent()
             );
 
-            // ATUALIZAÇÃO DO TEMPO DE ENVIO APÓS A TENTATIVA DO Z-API
-            state.setLastAutomatedMessageSent(LocalDateTime.now());
-            chatRoutineStateRepository.save(state);
-            // FIM DA CORREÇÃO
-
-            // Verifica se a mensagem foi enviada com sucesso
+            // Verifica se foi enviada com sucesso
             boolean sent = result != null && Boolean.TRUE.equals(result.get("success"));
 
             if (sent) {
-                log.info("✅ [CHAT: {}] Rotina #{} enviada ao entrar em repescagem", chat.getId(), nextSequence);
+                log.info("✅ [CHAT: {}] Chat movido para Repescagem → Rotina #{} enviada",
+                        chat.getId(), routineToSend.getSequenceNumber());
             } else {
-                log.error("❌ [CHAT: {}] Falha ao enviar rotina #{} ao entrar em repescagem. Contador e tempo atualizados.", chat.getId(), nextSequence);
+                log.error("❌ [CHAT: {}] Falha ao enviar rotina #{}", chat.getId(), routineToSend.getSequenceNumber());
             }
 
         } catch (Exception e) {
@@ -264,28 +267,26 @@ public class RoutineAutomationService {
         }
     }
 
-    // Verifica se é hora de enviar a próxima mensagem da rotina para um chat em repescagem
+    // Verifica e envia a próxima mensagem de rotina para um chat já em repescagem
     private void checkAndSendNextRoutineMessage(Chat chat, User user, List<RoutineText> routines) {
-        // Busca o estado da rotina deste chat
+        // Busca o estado de rotina deste chat
         Optional<ChatRoutineState> stateOpt = chatRoutineStateRepository.findByChatId(chat.getId());
 
-        // Se não tem estado, algo está errado (chat em repescagem sem estado)
+        // Se não existe estado, não faz nada
         if (stateOpt.isEmpty()) {
-            log.warn("⚠️ [CHAT: {}] Chat em Repescagem sem estado de rotina", chat.getId());
             return;
         }
 
         ChatRoutineState state = stateOpt.get();
-        state.setInRepescagem(true);
-        // Busca todas as mensagens do chat, mais recentes primeiro
-        List<Message> messages = messageRepository.findByChatIdOrderByTimestampDesc(chat.getId());
 
-        if (!messages.isEmpty()) {
-            // Pega a última mensagem do chat
-            Message lastMessage = messages.get(0);
+        // Verifica se o cliente respondeu olhando a última mensagem
+        Optional<Message> lastMessageOpt = messageRepository
+                .findTopByChatIdOrderByTimestampDesc(chat.getId());
 
-            // Se a última mensagem foi DO CLIENTE (não do usuário), significa que o cliente respondeu
-            // Neste caso, remove da repescagem porque o cliente está engajado novamente.
+        if (lastMessageOpt.isPresent()) {
+            Message lastMessage = lastMessageOpt.get();
+
+            // Se a última mensagem foi DO CLIENTE (fromMe=false), remove da repescagem
             if (!lastMessage.getFromMe()) {
                 log.info("📨 [CHAT: {}] Cliente respondeu, removendo da repescagem", chat.getId());
                 removeFromRepescagem(chat, state);
@@ -314,7 +315,7 @@ public class RoutineAutomationService {
 
                     // Se passou tempo suficiente, move para Lead Frio (cliente não respondeu)
                     if (hoursSinceLastAutomated >= lastRoutine.getHoursDelay()) {
-                        moveToLeadFrio(chat, state);
+                        moveToLeadFrio(chat, state, user);
                     }
                 }
             }
@@ -342,7 +343,7 @@ public class RoutineAutomationService {
             // ✅ TRATAMENTO: Se não existe a próxima rotina configurada, move para Lead Frio
             if (nextRoutineOpt.isEmpty()) {
                 log.warn("⚠️ [CHAT: {}] Não há rotina #{} configurada. Movendo para Lead Frio.", chat.getId(), nextSequence);
-                moveToLeadFrio(chat, state);
+                moveToLeadFrio(chat, state, user);
                 return;
             }
 
@@ -351,7 +352,7 @@ public class RoutineAutomationService {
             // ✅ TRATAMENTO: Se o textContent está vazio/null, move para Lead Frio
             if (nextRoutine.getTextContent() == null || nextRoutine.getTextContent().trim().isEmpty()) {
                 log.warn("⚠️ [CHAT: {}] Rotina #{} com textContent vazio. Movendo para Lead Frio.", chat.getId(), nextSequence);
-                moveToLeadFrio(chat, state);
+                moveToLeadFrio(chat, state, user);
                 return;
             }
 
@@ -414,8 +415,9 @@ public class RoutineAutomationService {
         }
     }
 
-    // Move um chat para a coluna "Lead Frio" após completar todas as rotinas sem resposta
-    private void moveToLeadFrio(Chat chat, ChatRoutineState state) {
+    // ✅ MODIFICADO: Move um chat para a coluna "Lead Frio" após completar todas as rotinas sem resposta
+    // Agora envia notificação SSE para atualizar o frontend
+    private void moveToLeadFrio(Chat chat, ChatRoutineState state, User user) {
         try {
             // Move o chat para a coluna de Lead Frio
             chat.setColumn(LEAD_FRIO_COLUMN);
@@ -426,6 +428,19 @@ public class RoutineAutomationService {
             // Marca que não está mais em repescagem
             state.setInRepescagem(false);
             chatRoutineStateRepository.save(state);
+
+            // ✅ NOVO: Enviar notificação SSE para atualizar frontend
+            notificationService.sendTaskCompletedNotification(
+                    user.getId(),
+                    Map.of(
+                            "chatId", chat.getId(),
+                            "chatName", chat.getName(),
+                            "chatColumn", chat.getColumn(),
+                            "type", "repescagem-completed"
+                    )
+            );
+
+            log.info("📡 [CHAT: {}] Notificação SSE enviada - Chat movido para Lead Frio", chat.getId());
 
         } catch (Exception e) {
             log.error("❌ [CHAT: {}] Erro ao mover para Lead Frio", chat.getId(), e);
