@@ -90,6 +90,28 @@ public class Chat {
     @Column(name = "atualizado_em")
     private LocalDateTime atualizadoEm;
 
+    // ✅ NOVO: Relacionamento com Messages - necessário para cascade delete
+    // Quando um Chat é deletado, todas as suas Messages são deletadas automaticamente
+    @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Message> messages = new ArrayList<>();
+
+    // ✅ NOVO: Relacionamento com ChatRoutineState - necessário para cascade delete
+    // Quando um Chat é deletado, todos os seus ChatRoutineStates são deletados automaticamente
+    @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ChatRoutineState> routineStates = new ArrayList<>();
+
+    // ✅ NOVO: Relacionamento com Audio - necessário para cascade delete
+    @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Audio> audios = new ArrayList<>();
+
+    // ✅ NOVO: Relacionamento com Photo - necessário para cascade delete
+    @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Photo> photos = new ArrayList<>();
+
+    // ✅ NOVO: Relacionamento com Video - necessário para cascade delete
+    @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Video> videos = new ArrayList<>();
+
     @PrePersist
     public void prePersist() {
         this.criadoEm = LocalDateTime.now();
