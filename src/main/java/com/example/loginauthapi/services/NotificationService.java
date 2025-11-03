@@ -171,4 +171,30 @@ public class NotificationService {
             }
         }
     }
+
+    /**
+     * ✅ NOVO: Enviar notificação de conclusão de tarefa
+     */
+    public void sendTaskCompletedNotification(String userId, Map<String, Object> taskData) {
+        CopyOnWriteArrayList<SseEmitter> emitters = userEmitters.get(userId);
+
+        if (emitters == null || emitters.isEmpty()) {
+            log.debug("Nenhum cliente SSE conectado para o usuário: {}", userId);
+            return;
+        }
+
+        log.info("✅ Enviando notificação de conclusão de tarefa para {} cliente(s) do usuário {}", emitters.size(), userId);
+
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("task-completed")
+                        .data(taskData)
+                );
+            } catch (IOException e) {
+                log.error("Erro ao enviar notificação de conclusão de tarefa", e);
+                removeEmitter(userId, emitter);
+            }
+        }
+    }
 }

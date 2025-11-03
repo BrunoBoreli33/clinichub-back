@@ -30,6 +30,7 @@ public class TaskService {
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
     private final ZapiMessageService zapiMessageService;
+    private final NotificationService notificationService;
 
     /**
      * Criar nova tarefa
@@ -235,6 +236,17 @@ public class TaskService {
             chat.setPreviousColumn(null);
             chatRepository.save(chat);
             log.info("✅ Chat {} voltou para '{}' (nenhuma tarefa pendente)", chat.getId(), targetColumn);
+
+            // Enviar notificação SSE para atualizar frontend
+            notificationService.sendTaskCompletedNotification(
+                    user.getId(),
+                    Map.of(
+                            "taskId", taskId,
+                            "chatId", chat.getId(),
+                            "chatName", chat.getName(),
+                            "chatColumn", chat.getColumn()
+                    )
+            );
         }
 
         Task updatedTask = taskRepository.save(task);
@@ -317,6 +329,17 @@ public class TaskService {
 
                     log.info("✅ Tarefa {} executada e chat {} voltou para '{}'",
                             task.getId(), chat.getId(), targetColumn);
+
+                    // Enviar notificação SSE para atualizar frontend
+                    notificationService.sendTaskCompletedNotification(
+                            user.getId(),
+                            Map.of(
+                                    "taskId", task.getId(),
+                                    "chatId", chat.getId(),
+                                    "chatName", chat.getName(),
+                                    "chatColumn", chat.getColumn()
+                            )
+                    );
                 } else {
                     log.info("✅ Tarefa {} executada. Chat {} permanece em 'task' ({} tarefa(s) pendente(s))",
                             task.getId(), chat.getId(), remainingTasks.size());
