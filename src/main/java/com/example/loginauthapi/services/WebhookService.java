@@ -1,8 +1,10 @@
 package com.example.loginauthapi.services;
 
 import com.example.loginauthapi.entities.Chat;
+import com.example.loginauthapi.entities.ChatRoutineState;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.ChatRepository;
+import com.example.loginauthapi.repositories.ChatRoutineStateRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +28,13 @@ public class WebhookService {
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
     private final NotificationService notificationService;
+
+    // ✅ NOVO: Injeções necessárias para remover chats da repescagem
+    private final ChatRoutineStateRepository chatRoutineStateRepository;
+    private final RoutineAutomationService routineAutomationService;
+
+    // Constante para identificar a coluna de repescagem
+    private static final String REPESCAGEM_COLUMN = "followup";
 
     /**
      * ✅ MODIFICADO: Método unificado para processar QUALQUER mensagem
@@ -179,6 +188,8 @@ public class WebhookService {
                             previousUnread);
                 } else {
                     // Mensagem RECEBIDA → INCREMENTAR contador
+                    // ✅ CORREÇÃO: Recarregar chat do banco para evitar race condition
+                    chat = chatRepository.findById(chat.getId()).orElse(chat);
                     chat.setUnread(chat.getUnread() + 1);
                     log.info("📥 Mensagem recebida - Incrementando contador (unread: {} → {})",
                             previousUnread, chat.getUnread());
@@ -209,6 +220,9 @@ public class WebhookService {
                     java.time.ZoneId.systemDefault()
             ));
             chat = chatRepository.save(chat);
+
+            // ✅ NOVO: VERIFICAR SE DEVE REMOVER DA REPESCAGEM
+            checkAndRemoveFromRepescagem(chat, fromMe, instance);
 
             // ✅ ENVIAR NOTIFICAÇÃO SSE
             if (!fromMe) {
@@ -300,6 +314,8 @@ public class WebhookService {
                     chat.setUnread(0);
                     log.info("📤 Foto enviada - Resetando contador (unread: {} → 0)", previousUnread);
                 } else {
+                    // ✅ CORREÇÃO: Recarregar chat do banco para evitar race condition
+                    chat = chatRepository.findById(chat.getId()).orElse(chat);
                     chat.setUnread(chat.getUnread() + 1);
                     log.info("📥 Foto recebida - Incrementando contador (unread: {} → {})",
                             previousUnread, chat.getUnread());
@@ -323,6 +339,9 @@ public class WebhookService {
             chat = chatRepository.save(chat);
 
             log.info("✅ Foto processada com sucesso - MessageId: {}, Chat: {}", messageId, chat.getId());
+
+            // ✅ NOVO: VERIFICAR SE DEVE REMOVER DA REPESCAGEM
+            checkAndRemoveFromRepescagem(chat, fromMe, instance);
 
             // ===== ENVIAR NOTIFICAÇÃO SSE =====
             if (!fromMe) {
@@ -410,6 +429,8 @@ public class WebhookService {
                     chat.setUnread(0);
                     log.info("📤 Áudio enviado - Resetando contador (unread: {} → 0)", previousUnread);
                 } else {
+                    // ✅ CORREÇÃO: Recarregar chat do banco para evitar race condition
+                    chat = chatRepository.findById(chat.getId()).orElse(chat);
                     chat.setUnread(chat.getUnread() + 1);
                     log.info("📥 Áudio recebido - Incrementando contador (unread: {} → {})",
                             previousUnread, chat.getUnread());
@@ -443,6 +464,9 @@ public class WebhookService {
 
             log.info("✅ Áudio processado com sucesso - MessageId: {}, Chat: {}, SenderName: {}",
                     messageId, chat.getId(), finalSenderName);
+
+            // ✅ NOVO: VERIFICAR SE DEVE REMOVER DA REPESCAGEM
+            checkAndRemoveFromRepescagem(chat, fromMe, instance);
 
             // ===== ENVIAR NOTIFICAÇÃO SSE =====
             if (!fromMe) {
@@ -537,6 +561,8 @@ public class WebhookService {
                     chat.setUnread(0);
                     log.info("📤 Vídeo enviado - Resetando contador (unread: {} → 0)", previousUnread);
                 } else {
+                    // ✅ CORREÇÃO: Recarregar chat do banco para evitar race condition
+                    chat = chatRepository.findById(chat.getId()).orElse(chat);
                     chat.setUnread(chat.getUnread() + 1);
                     log.info("📥 Vídeo recebido - Incrementando contador (unread: {} → {})",
                             previousUnread, chat.getUnread());
@@ -562,6 +588,9 @@ public class WebhookService {
 
             log.info("✅ Vídeo processado com sucesso - MessageId: {}, Chat: {}", messageId, chat.getId());
 
+            // ✅ NOVO: VERIFICAR SE DEVE REMOVER DA REPESCAGEM
+            checkAndRemoveFromRepescagem(chat, fromMe, instance);
+
             // ===== ENVIAR NOTIFICAÇÃO SSE =====
             if (!fromMe) {
                 sendNotificationToUser(instance.getUser().getId(), chat, chat.getLastMessageContent(), isNewChat);
@@ -571,6 +600,50 @@ public class WebhookService {
 
         } catch (Exception e) {
             log.error("❌ Erro ao processar vídeo", e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Verifica se o chat está em repescagem e remove automaticamente quando cliente responde
+     *
+     * Este método é chamado após salvar qualquer tipo de mensagem (texto, áudio, foto, vídeo)
+     * para verificar se o chat deve sair automaticamente da repescagem.
+     *
+     * @param chat O chat que recebeu a mensagem
+     * @param fromMe Indica se a mensagem foi enviada pelo sistema (true) ou pelo cliente (false)
+     * @param instance A instância do WhatsApp associada
+     */
+    private void checkAndRemoveFromRepescagem(Chat chat, Boolean fromMe, WebInstance instance) {
+        try {
+            // Apenas remove da repescagem se a mensagem foi RECEBIDA do cliente (fromMe=false)
+            if (fromMe != null && !fromMe) {
+                // Verifica se o chat está na coluna de repescagem
+                if (REPESCAGEM_COLUMN.equals(chat.getColumn())) {
+                    log.info("🔔 [CHAT: {}] Mensagem do cliente detectada durante repescagem, removendo automaticamente...",
+                            chat.getId());
+
+                    // Busca o estado de rotina do chat
+                    Optional<ChatRoutineState> stateOpt = chatRoutineStateRepository.findByChatId(chat.getId());
+
+                    if (stateOpt.isPresent()) {
+                        ChatRoutineState state = stateOpt.get();
+
+                        // Chama o método do RoutineAutomationService para remover da repescagem
+                        // Este método já cuida de:
+                        // 1. Mover o chat de volta para previousColumn
+                        // 2. Marcar inRepescagem como false
+                        // 3. Enviar notificação SSE para atualizar o frontend
+                        routineAutomationService.removeFromRepescagem(chat, state, instance.getUser());
+
+                        log.info("✅ [CHAT: {}] Chat removido da repescagem com sucesso!", chat.getId());
+                    } else {
+                        log.warn("⚠️ [CHAT: {}] Chat em repescagem mas sem ChatRoutineState encontrado",
+                                chat.getId());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("❌ [CHAT: {}] Erro ao verificar e remover da repescagem", chat.getId(), e);
         }
     }
 

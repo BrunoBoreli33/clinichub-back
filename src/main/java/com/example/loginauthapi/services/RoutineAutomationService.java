@@ -289,7 +289,7 @@ public class RoutineAutomationService {
             // Se a última mensagem foi DO CLIENTE (fromMe=false), remove da repescagem
             if (!lastMessage.getFromMe()) {
                 log.info("📨 [CHAT: {}] Cliente respondeu, removendo da repescagem", chat.getId());
-                removeFromRepescagem(chat, state);
+                removeFromRepescagem(chat, state, user);
                 return;
             }
         }
@@ -448,7 +448,9 @@ public class RoutineAutomationService {
     }
 
     // Remove um chat da repescagem quando o cliente responde
-    private void removeFromRepescagem(Chat chat, ChatRoutineState state) {
+    // ✅ MODIFICADO: Tornado público para ser chamado pelo WebhookService
+    @Transactional
+    public void removeFromRepescagem(Chat chat, ChatRoutineState state, User user) {
         try {
             // Retorna o chat para a coluna onde ele estava antes da repescagem
             String previousColumn = state.getPreviousColumn();
@@ -468,6 +470,20 @@ public class RoutineAutomationService {
             // Mantém o lastRoutineSent para referência futura
             state.setInRepescagem(false);
             chatRoutineStateRepository.save(state);
+
+            // ✅ NOVO: Enviar notificação SSE para atualizar frontend
+            notificationService.sendTaskCompletedNotification(
+                    user.getId(),
+                    Map.of(
+                            "chatId", chat.getId(),
+                            "chatName", chat.getName(),
+                            "chatColumn", chat.getColumn(),
+                            "previousColumn", previousColumn,
+                            "type", "chat-removed-from-repescagem"
+                    )
+            );
+
+            log.info("📡 [CHAT: {}] Notificação SSE enviada - Chat removido da Repescagem", chat.getId());
 
         } catch (Exception e) {
             log.error("❌ [CHAT: {}] Erro ao remover da repescagem", chat.getId(), e);
@@ -501,7 +517,7 @@ public class RoutineAutomationService {
                 // ✅ NOVA LÓGICA: Se estava em Repescagem, remove da coluna
                 if (wasInRepescagem) {
                     log.info("🔄 [CHAT: {}] Chat estava em Repescagem, removendo da coluna...", chatId);
-                    removeFromRepescagem(chat, state);
+                    removeFromRepescagem(chat, state, chat.getWebInstance().getUser());
                 }
             });
 
