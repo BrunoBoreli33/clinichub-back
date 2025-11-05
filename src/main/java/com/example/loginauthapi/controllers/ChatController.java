@@ -197,4 +197,54 @@ public class ChatController {
             ));
         }
     }
+
+    /**
+     * ✅ NOVO: PATCH /dashboard/chats/{chatId}/toggle-hidden
+     * Alterna o estado de oculto do chat (isHidden)
+     */
+    @PatchMapping("/{chatId}/toggle-hidden")
+    public ResponseEntity<Map<String, Object>> toggleChatHidden(@PathVariable String chatId) {
+        try {
+            log.info("👁️ Alternando estado de oculto do chat {}", chatId);
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            // Busca o chat
+            Chat chat = chatRepository.findById(chatId)
+                    .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+
+            // Verifica se o chat pertence ao usuário
+            if (!chat.getWebInstance().getId().equals(instance.getId())) {
+                log.warn("⚠️ Tentativa de acesso não autorizado ao chat {}", chatId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "success", false,
+                        "message", "Chat não pertence ao usuário"
+                ));
+            }
+
+            // Alterna o estado de isHidden
+            boolean newHiddenState = !chat.getIsHidden();
+            chat.setIsHidden(newHiddenState);
+            chatRepository.save(chat);
+
+            log.info("✅ Chat {} marcado como {} pelo usuário {}",
+                    chatId,
+                    newHiddenState ? "OCULTO" : "VISÍVEL",
+                    user.getEmail());
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", newHiddenState ? "Chat ocultado com sucesso" : "Chat exibido com sucesso",
+                    "isHidden", newHiddenState
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao alternar estado de oculto do chat {}", chatId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao alternar estado de oculto: " + e.getMessage()
+            ));
+        }
+    }
 }
