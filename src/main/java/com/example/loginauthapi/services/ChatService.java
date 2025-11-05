@@ -629,6 +629,7 @@ public class ChatService {
                 .column(chat.getColumn())
                 .tags(tagDtos)
                 .isUploadChat(chat.getIsUploadChat() != null ? chat.getIsUploadChat() : false)
+                .isHidden(chat.getIsHidden() != null ? chat.getIsHidden() : false)
                 .build();
     }
 }

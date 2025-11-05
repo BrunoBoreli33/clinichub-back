@@ -31,4 +31,7 @@ public class ChatInfoResponseDTO {
 
     // ✅ NOVO: Indica se este chat é usado para upload de mídias
     private Boolean isUploadChat;
+
+    // ✅ NOVO: Indica se este chat está oculto
+    private Boolean isHidden;
 }
