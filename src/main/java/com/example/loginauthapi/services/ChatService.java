@@ -628,6 +628,7 @@ public class ChatService {
                 .profileThumbnail(chat.getProfileThumbnail())
                 .column(chat.getColumn())
                 .tags(tagDtos)
+                .isUploadChat(chat.getIsUploadChat() != null ? chat.getIsUploadChat() : false)
                 .build();
     }
 }

@@ -72,6 +72,10 @@ public class Chat {
     @Column(name = "active_in_zapi", nullable = false)
     private Boolean activeInZapi = true;
 
+    // ✅ NOVO: Indica se este chat é usado para upload de mídias
+    @Column(name = "is_upload_chat", nullable = false)
+    private Boolean isUploadChat = false;
+
     // ✅ ALTERADO: De @OneToOne para @OneToMany
     @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Task> tasks = new ArrayList<>();

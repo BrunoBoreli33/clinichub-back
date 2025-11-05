@@ -2,9 +2,12 @@ package com.example.loginauthapi.services;
 
 import com.example.loginauthapi.dto.VideoDTO;
 import com.example.loginauthapi.entities.Chat;
+import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.Video;
+import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.ChatRepository;
 import com.example.loginauthapi.repositories.VideoRepository;
+import com.example.loginauthapi.repositories.WebInstanceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +28,7 @@ public class VideoService {
 
     private final VideoRepository videoRepository;
     private final ChatRepository chatRepository;
+    private final WebInstanceRepository webInstanceRepository;
 
     /**
      * Salvar vídeo recebido via webhook
@@ -231,6 +235,67 @@ public class VideoService {
         } catch (Exception e) {
             log.error("❌ Erro ao atualizar video após envio", e);
             throw new RuntimeException("Erro ao atualizar video: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Salvar vídeo de upload direto (sem chatId pré-definido)
+     * Cria ou encontra o chat baseado no phone
+     * Automaticamente salva na galeria se o phone corresponder ao upload_phone_number do usuário
+     */
+    @Transactional
+    public VideoDTO saveUploadVideo(String phone, String videoUrl, String instanceId, User user) {
+        try {
+            // Buscar a WebInstance
+            WebInstance webInstance = webInstanceRepository.findById(instanceId)
+                    .orElseThrow(() -> new RuntimeException("WebInstance não encontrada: " + instanceId));
+
+            // Buscar ou criar chat com base no phone e webInstanceId
+            Chat chat = chatRepository.findByPhoneAndWebInstanceId(phone, instanceId)
+                    .orElseGet(() -> {
+                        Chat newChat = new Chat();
+                        newChat.setPhone(phone);
+                        newChat.setWebInstance(webInstance);
+                        newChat.setName(phone);
+                        newChat.setProfileThumbnail(null);
+                        newChat.setUnread(0);
+                        newChat.setLastMessageTime(LocalDateTime.now());
+                        newChat.setActiveInZapi(true);
+                        newChat.setIsGroup(false);
+                        return chatRepository.save(newChat);
+                    });
+
+            // Gerar messageId temporário
+            String tempMessageId = "temp_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString();
+
+            Video video = new Video();
+            video.setMessageId(tempMessageId);
+            video.setChat(chat);
+            video.setVideoUrl(videoUrl);
+            video.setTimestamp(LocalDateTime.now());
+            video.setFromMe(true);
+            video.setStatus("PENDING");
+            video.setSenderName(chat.getName());
+            video.setPhone(phone);
+            video.setInstanceId(instanceId);
+            video.setCaption(null);
+            video.setWidth(0);
+            video.setHeight(0);
+            video.setSeconds(0);
+
+            // ✅ Verificar se deve salvar na galeria automaticamente
+            boolean shouldSaveInGallery = user.getUploadPhoneNumber() != null
+                    && user.getUploadPhoneNumber().equals(phone);
+            video.setSavedInGallery(shouldSaveInGallery);
+
+            video = videoRepository.save(video);
+            log.info("✅ Vídeo de upload salvo - MessageId: {}, SavedInGallery: {}",
+                    tempMessageId, shouldSaveInGallery);
+
+            return convertToDTO(video);
+        } catch (Exception e) {
+            log.error("❌ Erro ao salvar vídeo de upload", e);
+            throw new RuntimeException("Erro ao salvar vídeo de upload: " + e.getMessage(), e);
         }
     }
 

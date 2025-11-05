@@ -504,6 +504,123 @@ public class MessageController {
     }
 
     /**
+     * POST /dashboard/messages/upload-image
+     * Upload de imagem direto (sem chatId pré-definido)
+     * Cria ou encontra o chat baseado no phone e envia a imagem
+     */
+    @PostMapping("/upload-image")
+    public ResponseEntity<Map<String, Object>> uploadImage(@RequestBody Map<String, Object> body) {
+        try {
+            log.info("📤 Requisição para upload de imagem");
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            String phone = (String) body.get("phone");
+            String image = (String) body.get("image");
+
+            if (phone == null || image == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "Phone e image são obrigatórios"
+                ));
+            }
+
+            // ✅ PASSO 1: Salvar foto para upload direto (sem chatId)
+            log.info("💾 Salvando foto para upload direto - Phone: {}", phone);
+            PhotoDTO savedPhoto = photoService.saveUploadPhoto(phone, image, instance.getId(), user);
+
+            // ✅ PASSO 2: Enviar via Z-API
+            log.info("📨 Enviando imagem via Z-API - Phone: {}", phone);
+            Map<String, Object> zapiResult = zapiMessageService.sendImage(
+                    instance, phone, image
+            );
+
+            // ✅ PASSO 3: Atualizar com messageId real
+            if (zapiResult != null && zapiResult.containsKey("messageId")) {
+                String realMessageId = (String) zapiResult.get("messageId");
+                photoService.updatePhotoIdAfterSend(
+                        savedPhoto.getMessageId(), realMessageId, "SENT"
+                );
+                savedPhoto.setMessageId(realMessageId);
+                savedPhoto.setStatus("SENT");
+            }
+
+            log.info("✅ Imagem enviada via upload com sucesso");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Imagem enviada com sucesso",
+                    "data", savedPhoto
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao fazer upload de imagem: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao fazer upload de imagem: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * POST /dashboard/messages/upload-video
+     * Upload de vídeo direto (sem chatId pré-definido)
+     */
+    @PostMapping("/upload-video")
+    public ResponseEntity<Map<String, Object>> uploadVideo(@RequestBody Map<String, Object> body) {
+        try {
+            log.info("📤 Requisição para upload de vídeo");
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            String phone = (String) body.get("phone");
+            String video = (String) body.get("video");
+
+            if (phone == null || video == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "Phone e video são obrigatórios"
+                ));
+            }
+
+            // ✅ PASSO 1: Salvar vídeo para upload direto
+            log.info("💾 Salvando vídeo para upload direto - Phone: {}", phone);
+            VideoDTO savedVideo = videoService.saveUploadVideo(phone, video, instance.getId(), user);
+
+            // ✅ PASSO 2: Enviar via Z-API
+            log.info("📨 Enviando vídeo via Z-API - Phone: {}", phone);
+            Map<String, Object> zapiResult = zapiMessageService.sendVideo(
+                    instance, phone, video
+            );
+
+            // ✅ PASSO 3: Atualizar com messageId real
+            if (zapiResult != null && zapiResult.containsKey("messageId")) {
+                String realMessageId = (String) zapiResult.get("messageId");
+                videoService.updateVideoIdAfterSend(
+                        savedVideo.getMessageId(), realMessageId, "SENT"
+                );
+                savedVideo.setMessageId(realMessageId);
+                savedVideo.setStatus("SENT");
+            }
+
+            log.info("✅ Vídeo enviado via upload com sucesso");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Vídeo enviado com sucesso",
+                    "data", savedVideo
+            ));
+        } catch (Exception e) {
+            log.error("❌ Erro ao fazer upload de vídeo: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao fazer upload de vídeo: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
      * PUT /dashboard/messages/edit
      * Editar mensagem
      */
