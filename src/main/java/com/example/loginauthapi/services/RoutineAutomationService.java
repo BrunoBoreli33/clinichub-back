@@ -109,6 +109,13 @@ public class RoutineAutomationService {
     // Verifica se um chat deve ser movido para repescagem e envia a primeira mensagem
     private void checkAndMoveToRepescagem(Chat chat, User user, RoutineText firstRoutine, List<RoutineText> routines) {
 
+        // ✅ NOVO: Verifica se a repescagem já foi concluída anteriormente
+        Optional<ChatRoutineState> stateOpt = chatRoutineStateRepository.findByChatId(chat.getId());
+        if (stateOpt.isPresent() && Boolean.TRUE.equals(stateOpt.get().getRepescagemCompleted())) {
+            log.info("✋ [CHAT: {}] Repescagem já foi concluída anteriormente. Não será reprocessado.", chat.getId());
+            return;
+        }
+
         // *************************************************************************
         // CORREÇÃO: PRIMEIRA VERIFICAÇÃO DE ATIVIDADE DO CLIENTE (MANTÉM O CHAT FORA SE ATIVO)
         // Usando a sintaxe CORRETA do seu MessageRepository: findTopByChatIdOrderByTimestampDesc
@@ -427,6 +434,8 @@ public class RoutineAutomationService {
 
             // Marca que não está mais em repescagem
             state.setInRepescagem(false);
+            // ✅ NOVO: Marca que a repescagem foi concluída
+            state.setRepescagemCompleted(true);
             chatRoutineStateRepository.save(state);
 
             // ✅ NOVO: Enviar notificação SSE para atualizar frontend
@@ -510,9 +519,11 @@ public class RoutineAutomationService {
                 state.setLastRoutineSent(0); // Volta para 0 (nenhuma rotina enviada)
                 state.setLastAutomatedMessageSent(null); // Remove o horário da última mensagem
                 state.setInRepescagem(false); // Marca que não está em repescagem
+                // ✅ NOVO: Reseta a flag de repescagem concluída
+                state.setRepescagemCompleted(false);
                 chatRoutineStateRepository.save(state);
 
-                log.info("✅ [CHAT: {}] Estado de rotina resetado", chatId);
+                log.info("✅ [CHAT: {}] Estado de rotina resetado (incluindo flag repescagemCompleted)", chatId);
 
                 // ✅ NOVA LÓGICA: Se estava em Repescagem, remove da coluna
                 if (wasInRepescagem) {

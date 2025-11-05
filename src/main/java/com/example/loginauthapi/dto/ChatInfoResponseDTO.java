@@ -28,4 +28,7 @@ public class ChatInfoResponseDTO {
 
     // ✅ MODIFICADO: Agora retorna lista de tags ao invés de um único ticket
     private List<TagDTO> tags;
+
+    // ✅ NOVO: Indica se este chat é usado para upload de mídias
+    private Boolean isUploadChat;
 }

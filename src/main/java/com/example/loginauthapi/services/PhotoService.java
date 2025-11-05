@@ -3,8 +3,11 @@ package com.example.loginauthapi.services;
 import com.example.loginauthapi.dto.PhotoDTO;
 import com.example.loginauthapi.entities.Chat;
 import com.example.loginauthapi.entities.Photo;
+import com.example.loginauthapi.entities.User;
+import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.ChatRepository;
 import com.example.loginauthapi.repositories.PhotoRepository;
+import com.example.loginauthapi.repositories.WebInstanceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +28,7 @@ public class PhotoService {
 
     private final PhotoRepository photoRepository;
     private final ChatRepository chatRepository;
+    private final WebInstanceRepository webInstanceRepository;
 
     /**
      * ✅ MODIFICADO: Salvar foto recebida via webhook (adicionado parâmetro caption)
@@ -223,6 +227,66 @@ public class PhotoService {
         } catch (Exception e) {
             log.error("❌ Erro ao atualizar photo após envio", e);
             throw new RuntimeException("Erro ao atualizar photo: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Salvar foto de upload direto (sem chatId pré-definido)
+     * Cria ou encontra o chat baseado no phone
+     * Automaticamente salva na galeria se o phone corresponder ao upload_phone_number do usuário
+     */
+    @Transactional
+    public PhotoDTO saveUploadPhoto(String phone, String imageUrl, String instanceId, User user) {
+        try {
+            // Buscar a WebInstance
+            WebInstance webInstance = webInstanceRepository.findById(instanceId)
+                    .orElseThrow(() -> new RuntimeException("WebInstance não encontrada: " + instanceId));
+
+            // Buscar ou criar chat com base no phone e webInstanceId
+            Chat chat = chatRepository.findByPhoneAndWebInstanceId(phone, instanceId)
+                    .orElseGet(() -> {
+                        Chat newChat = new Chat();
+                        newChat.setPhone(phone);
+                        newChat.setWebInstance(webInstance);
+                        newChat.setName(phone);
+                        newChat.setProfileThumbnail(null);
+                        newChat.setUnread(0);
+                        newChat.setLastMessageTime(LocalDateTime.now());
+                        newChat.setActiveInZapi(true);
+                        newChat.setIsGroup(false);
+                        return chatRepository.save(newChat);
+                    });
+
+            // Gerar messageId temporário
+            String tempMessageId = "temp_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString();
+
+            Photo photo = new Photo();
+            photo.setMessageId(tempMessageId);
+            photo.setChat(chat);
+            photo.setImageUrl(imageUrl);
+            photo.setTimestamp(LocalDateTime.now());
+            photo.setFromMe(true);
+            photo.setStatus("PENDING");
+            photo.setSenderName(chat.getName());
+            photo.setPhone(phone);
+            photo.setInstanceId(instanceId);
+            photo.setCaption(null);
+            photo.setWidth(0);
+            photo.setHeight(0);
+
+            // ✅ Verificar se deve salvar na galeria automaticamente
+            boolean shouldSaveInGallery = user.getUploadPhoneNumber() != null
+                    && user.getUploadPhoneNumber().equals(phone);
+            photo.setSavedInGallery(shouldSaveInGallery);
+
+            photo = photoRepository.save(photo);
+            log.info("✅ Foto de upload salva - MessageId: {}, SavedInGallery: {}",
+                    tempMessageId, shouldSaveInGallery);
+
+            return convertToDTO(photo);
+        } catch (Exception e) {
+            log.error("❌ Erro ao salvar foto de upload", e);
+            throw new RuntimeException("Erro ao salvar foto de upload: " + e.getMessage(), e);
         }
     }
 

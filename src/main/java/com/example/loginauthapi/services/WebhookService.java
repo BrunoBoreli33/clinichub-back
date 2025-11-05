@@ -2,10 +2,13 @@ package com.example.loginauthapi.services;
 
 import com.example.loginauthapi.entities.Chat;
 import com.example.loginauthapi.entities.ChatRoutineState;
+import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.ChatRepository;
 import com.example.loginauthapi.repositories.ChatRoutineStateRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
+import com.example.loginauthapi.repositories.PhotoRepository;
+import com.example.loginauthapi.repositories.VideoRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,6 +35,9 @@ public class WebhookService {
     // ✅ NOVO: Injeções necessárias para remover chats da repescagem
     private final ChatRoutineStateRepository chatRoutineStateRepository;
     private final RoutineAutomationService routineAutomationService;
+
+    private final PhotoRepository photoRepository;
+    private final VideoRepository videoRepository;
 
     // Constante para identificar a coluna de repescagem
     private static final String REPESCAGEM_COLUMN = "followup";
@@ -331,6 +337,28 @@ public class WebhookService {
                     isGroup, isNewsletter, isForwarded, chatName, senderName, status
             );
 
+            // ✅ NOVO: VERIFICAR SE É UPLOAD E AUTO-SALVAR NA GALERIA
+            User owner = instance.getUser();
+            if (owner.getUploadPhoneNumber() != null &&
+                    owner.getUploadPhoneNumber().equals(phone) &&
+                    !fromMe) {
+
+                log.info("📸 Foto recebida no número de upload - Auto-salvando na galeria");
+
+                // Marcar chat como upload chat
+                if (!chat.getIsUploadChat()) {
+                    chat.setIsUploadChat(true);
+                    chatRepository.save(chat);
+                }
+
+                // Buscar a foto recém-salva e marcar como salva na galeria
+                photoRepository.findByMessageId(messageId).ifPresent(photo -> {
+                    photo.setSavedInGallery(true);
+                    photoRepository.save(photo);
+                    log.info("✅ Foto auto-salva na galeria - PhotoId: {}", photo.getId());
+                });
+            }
+
             // ===== ATUALIZAR lastMessageTime =====
             chat.setLastMessageTime(LocalDateTime.ofInstant(
                     java.time.Instant.ofEpochMilli(momment),
@@ -578,6 +606,28 @@ public class WebhookService {
                     isStatusReply, isEdit, isGroup, isNewsletter, isForwarded,
                     chatName, senderName, status
             );
+
+            // ✅ NOVO: VERIFICAR SE É UPLOAD E AUTO-SALVAR NA GALERIA
+            User owner = instance.getUser();
+            if (owner.getUploadPhoneNumber() != null &&
+                    owner.getUploadPhoneNumber().equals(phone) &&
+                    !fromMe) {
+
+                log.info("🎥 Vídeo recebido no número de upload - Auto-salvando na galeria");
+
+                // Marcar chat como upload chat
+                if (!chat.getIsUploadChat()) {
+                    chat.setIsUploadChat(true);
+                    chatRepository.save(chat);
+                }
+
+                // Buscar o vídeo recém-salvo e marcar como salvo na galeria
+                videoRepository.findByMessageId(messageId).ifPresent(video -> {
+                    video.setSavedInGallery(true);
+                    videoRepository.save(video);
+                    log.info("✅ Vídeo auto-salvo na galeria - VideoId: {}", video.getId());
+                });
+            }
 
             // ===== ATUALIZAR lastMessageTime =====
             chat.setLastMessageTime(LocalDateTime.ofInstant(

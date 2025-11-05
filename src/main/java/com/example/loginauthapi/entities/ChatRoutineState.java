@@ -48,6 +48,10 @@ public class ChatRoutineState {
     @Column(nullable = false)
     private Boolean inRepescagem = false;
 
+    //NOVO: Flag indicando se a repescagem foi concluida (movido para Lead Frio)
+    @Column(nullable = false)
+    private Boolean repescagemCompleted = false;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 

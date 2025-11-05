@@ -30,6 +30,10 @@ public class User {
     private String confirmationToken;
     private String role;
 
+    // ✅ NOVO: Número de telefone para upload de mídias
+    @Column(name = "upload_phone_number", length = 20)
+    private String uploadPhoneNumber;
+
     // Relacionamento 1:N -> um usuário pode ter várias WebInstances
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<WebInstance> webInstances = new ArrayList<>();

@@ -22,6 +22,7 @@ import java.util.Map;
 @RequestMapping("/api/profile")
 @RequiredArgsConstructor
 @Slf4j
+@CrossOrigin(origins = "*", allowedHeaders = "*")
 public class ProfileController {
 
     private final UserRepository userRepository;
@@ -278,6 +279,104 @@ public class ProfileController {
             log.error("Erro ao confirmar mudança de senha", e);
             return ResponseEntity.internalServerError()
                     .body(Map.of("success", false, "message", "Erro ao atualizar senha"));
+        }
+    }
+
+    // ✅ NOVO: PUT /api/profile/upload-phone
+    // Configurar número de telefone para upload de mídias
+    @PutMapping("/upload-phone")
+    public ResponseEntity<Map<String, Object>> setUploadPhoneNumber(@RequestBody Map<String, String> body) {
+        try {
+            log.info("📱 Requisição para configurar número de upload");
+
+            User user = getAuthenticatedUser();
+            log.info("👤 Usuário autenticado: {} (ID: {})", user.getEmail(), user.getId());
+
+            String phoneNumber = body.get("phoneNumber");
+            log.info("📞 Número recebido: {}", phoneNumber);
+
+            if (phoneNumber == null || phoneNumber.trim().isEmpty()) {
+                log.warn("⚠️ Número de telefone vazio ou nulo");
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "Número de telefone é obrigatório"
+                ));
+            }
+
+            String cleanPhone = phoneNumber.trim();
+            log.info("🧹 Número limpo: {}", cleanPhone);
+
+            User updatedUser = profileUpdateService.setUploadPhoneNumber(user.getId(), cleanPhone);
+
+            log.info("✅ Número de upload configurado com sucesso: {}", updatedUser.getUploadPhoneNumber());
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Número de upload configurado com sucesso",
+                    "uploadPhoneNumber", updatedUser.getUploadPhoneNumber()
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao configurar número de upload", e);
+            log.error("❌ Tipo de erro: {}", e.getClass().getName());
+            log.error("❌ Mensagem: {}", e.getMessage());
+            if (e.getCause() != null) {
+                log.error("❌ Causa raiz: {}", e.getCause().getMessage());
+            }
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao salvar número de upload: " + e.getMessage()
+            ));
+        }
+    }
+
+    // ✅ NOVO: GET /api/profile/upload-phone
+    // Buscar número de upload configurado
+    @GetMapping("/upload-phone")
+    public ResponseEntity<Map<String, Object>> getUploadPhoneNumber() {
+        try {
+            log.info("🔍 Requisição para buscar número de upload");
+
+            User user = getAuthenticatedUser();
+            String phoneNumber = profileUpdateService.getUploadPhoneNumber(user.getId());
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "uploadPhoneNumber", phoneNumber != null ? phoneNumber : ""
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao buscar número de upload", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    // ✅ NOVO: DELETE /api/profile/upload-phone
+    // Remover configuração de número de upload
+    @DeleteMapping("/upload-phone")
+    public ResponseEntity<Map<String, Object>> removeUploadPhoneNumber() {
+        try {
+            log.info("🗑️ Requisição para remover número de upload");
+
+            User user = getAuthenticatedUser();
+            profileUpdateService.removeUploadPhoneNumber(user.getId());
+
+            log.info("✅ Número de upload removido com sucesso");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Número de upload removido com sucesso"
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao remover número de upload", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
         }
     }
 }
