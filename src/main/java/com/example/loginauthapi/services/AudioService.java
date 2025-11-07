@@ -184,6 +184,29 @@ public class AudioService {
     }
 
     /**
+     * âœ… NOVO: Excluir Audio do banco de dados
+     */
+    @Transactional
+    public void deleteAudio(String messageId) {
+        try {
+            log.info("ðŸ—'ï¸ Excluindo Ã¡udio - MessageId: {}", messageId);
+
+            Optional<Audio> audioOpt = audioRepository.findByMessageId(messageId);
+
+            if (audioOpt.isPresent()) {
+                audioRepository.delete(audioOpt.get());
+                log.info("Audio Excluido do Banco - MessageId: {}", messageId);
+            } else {
+                log.warn("Audio não encontrado no banco - MessageId: {}", messageId);
+            }
+
+        } catch (Exception e) {
+            log.error("Erro ao Excluir Audio do Banco!", e);
+            throw new RuntimeException("Erro ao excluir Ã¡udio: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Converter para DTO
      */
     private AudioDTO convertToDTO(Audio audio) {

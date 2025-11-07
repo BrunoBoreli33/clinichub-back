@@ -678,6 +678,89 @@ public class MessageController {
     }
 
     /**
+     * ✅ NOVO: DELETE /dashboard/messages/delete
+     * Excluir mensagem (texto, áudio, foto, vídeo ou documento)
+     */
+    @DeleteMapping("/delete")
+    public ResponseEntity<Map<String, Object>> deleteMessage(@RequestBody Map<String, String> body) {
+        try {
+            log.info("🗑️ Requisição para excluir mensagem");
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            String messageId = body.get("messageId");
+            String phone = body.get("phone");
+            String messageType = body.get("messageType"); // "text", "audio", "photo", "video", "document"
+            String ownerStr = body.get("owner"); // "true" ou "false"
+
+            if (messageId == null || phone == null || ownerStr == null) {
+                log.warn("⚠️ Parâmetros obrigatórios ausentes");
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "messageId, phone e owner são obrigatórios"
+                ));
+            }
+
+            boolean owner = Boolean.parseBoolean(ownerStr);
+
+            // ✅ PASSO 1: Excluir da Z-API
+            log.info("📨 Excluindo mensagem da Z-API - MessageId: {}, Phone: {}, Owner: {}",
+                    messageId, phone, owner);
+
+            try {
+                zapiMessageService.deleteMessage(instance, messageId, phone, owner);
+                log.info("✅ Mensagem excluída da Z-API com sucesso");
+            } catch (Exception e) {
+                log.error("❌ Erro ao excluir mensagem da Z-API: {}", e.getMessage());
+                // Continua para excluir do banco mesmo se falhar na Z-API
+            }
+
+            // ✅ PASSO 2: Excluir do banco de dados baseado no tipo
+            log.info("💾 Excluindo mensagem do banco - Type: {}, MessageId: {}", messageType, messageId);
+
+            switch (messageType) {
+                case "text":
+                    messageService.deleteMessage(messageId);
+                    break;
+                case "audio":
+                    audioService.deleteAudio(messageId);
+                    break;
+                case "photo":
+                    photoService.deletePhoto(messageId);
+                    break;
+                case "video":
+                    videoService.deleteVideo(messageId);
+                    break;
+                case "document":
+                    documentService.deleteDocument(messageId);
+                    break;
+                default:
+                    log.warn("⚠️ Tipo de mensagem desconhecido: {}", messageType);
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "success", false,
+                            "message", "Tipo de mensagem inválido: " + messageType
+                    ));
+            }
+
+            log.info("✅ Mensagem excluída com sucesso - Type: {}, MessageId: {}", messageType, messageId);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Mensagem excluída com sucesso",
+                    "messageId", messageId,
+                    "messageType", messageType
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao excluir mensagem - Erro: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao excluir mensagem: " + e.getMessage()
+            ));
+        }
+    }
+    /**
      * POST /dashboard/messages/upload-document
      * ✅ CORRIGIDO: NÃO salva Base64 no banco, apenas envia via Z-API
      * O webhook vai salvar com documentUrl correto

@@ -286,4 +286,49 @@ public class ZapiMessageService {
             throw new RuntimeException("Erro ao enviar documento via Z-API: " + e.getMessage(), e);
         }
     }
+
+    /**
+     * ✅ NOVO: Excluir mensagem via Z-API
+     * DELETE https://api.z-api.io/instances/SUA_INSTANCIA/token/SEU_TOKEN/messages
+     */
+    public void deleteMessage(WebInstance instance, String messageId, String phone, boolean owner) {
+        try {
+            String url = String.format("%s/instances/%s/token/%s/messages?messageId=%s&phone=%s&owner=%s",
+                    ZAPI_BASE_URL,
+                    instance.getSuaInstancia(),
+                    instance.getSeuToken(),
+                    messageId,
+                    phone,
+                    owner);
+
+            log.info("🗑️ Excluindo mensagem - MessageId: {}, Phone: {}, Owner: {}",
+                    messageId, phone, owner);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Client-Token", instance.getClientToken());
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.DELETE,
+                    entity,
+                    Map.class
+            );
+
+            // A Z-API retorna 204 No Content em caso de sucesso
+            if (response.getStatusCode() == HttpStatus.NO_CONTENT ||
+                    response.getStatusCode() == HttpStatus.OK) {
+                log.info("✅ Mensagem excluída com sucesso da Z-API - MessageId: {}", messageId);
+            } else {
+                log.warn("⚠️ Resposta inesperada da Z-API - Status: {}", response.getStatusCode());
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao excluir mensagem da Z-API", e);
+            throw new RuntimeException("Erro ao excluir mensagem via Z-API: " + e.getMessage(), e);
+        }
+    }
 }

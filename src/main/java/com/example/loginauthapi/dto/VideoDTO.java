@@ -33,4 +33,5 @@ public class VideoDTO {
     private String senderName;
     private String status;
     private Boolean savedInGallery;
+    private Boolean deletedFromChat; // ✅ NOVO
 }

@@ -98,6 +98,7 @@ public class PhotoService {
         photo.setSenderName(senderName);
         photo.setStatus(status != null ? status : "PENDING");
         photo.setSavedInGallery(false);
+        photo.setDeletedFromChat(false); // ✅ NOVO: Inicializar
 
         Photo saved = photoRepository.save(photo);
         log.info("✅ Foto criada - MessageId: {}, ChatId: {}, ImageUrl: {}, Caption: {}",
@@ -107,7 +108,7 @@ public class PhotoService {
     }
 
     /**
-     * Buscar fotos de um chat
+     * ✅ MODIFICADO: Buscar fotos de um chat - Filtrar deletadas
      */
     public List<PhotoDTO> getPhotosByChatId(String chatId) {
         if (!chatRepository.existsById(chatId)) {
@@ -117,6 +118,7 @@ public class PhotoService {
         List<Photo> photos = photoRepository.findByChatIdOrderByTimestampAsc(chatId);
 
         return photos.stream()
+                .filter(photo -> photo.getDeletedFromChat() == null || !photo.getDeletedFromChat())
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
@@ -133,19 +135,26 @@ public class PhotoService {
     }
 
     /**
-     * Marcar/desmarcar foto como salva na galeria
+     * ✅ MODIFICADO: Marcar/desmarcar foto como salva na galeria + verificar delete permanente
      */
     @Transactional
     public PhotoDTO togglePhotoInGallery(String photoId) {
         Photo photo = photoRepository.findById(photoId)
                 .orElseThrow(() -> new RuntimeException("Foto não encontrada"));
 
-        photo.setSavedInGallery(!photo.getSavedInGallery());
+        boolean wasInGallery = photo.getSavedInGallery();
+        photo.setSavedInGallery(!wasInGallery);
         Photo updated = photoRepository.save(photo);
 
         log.info("✅ Foto {} {} na galeria",
                 photo.getSavedInGallery() ? "salva" : "removida",
                 photo.getSavedInGallery() ? "para" : "da");
+
+        // ✅ NOVO: Se removeu da galeria E já estava deletada do chat, deletar permanentemente
+        if (!photo.getSavedInGallery() && photo.getDeletedFromChat() != null && photo.getDeletedFromChat()) {
+            log.info("🗑️ Foto removida da galeria e já deletada do chat - deletando permanentemente");
+            photoRepository.delete(photo);
+        }
 
         return convertToDTO(updated);
     }
@@ -174,6 +183,7 @@ public class PhotoService {
             photo.setSavedInGallery(false);
             photo.setPhone(phone);
             photo.setInstanceId(instanceId);
+            photo.setDeletedFromChat(false); // ✅ NOVO
 
             // ✅ Se photoId fornecido, copiar informações da foto original
             if (photoId != null && !photoId.isEmpty()) {
@@ -273,6 +283,7 @@ public class PhotoService {
             photo.setCaption(null);
             photo.setWidth(0);
             photo.setHeight(0);
+            photo.setDeletedFromChat(false); // ✅ NOVO
 
             // ✅ Verificar se deve salvar na galeria automaticamente
             boolean shouldSaveInGallery = user.getUploadPhoneNumber() != null
@@ -291,7 +302,41 @@ public class PhotoService {
     }
 
     /**
-     * ✅ MODIFICADO: Converter para DTO (adicionado caption)
+     * ✅ MODIFICADO: Excluir foto com soft delete baseado na galeria
+     */
+    @Transactional
+    public void deletePhoto(String messageId) {
+        try {
+            log.info("🗑️ Excluindo foto - MessageId: {}", messageId);
+
+            Optional<Photo> photoOpt = photoRepository.findByMessageId(messageId);
+
+            if (photoOpt.isPresent()) {
+                Photo photo = photoOpt.get();
+
+                // ✅ LÓGICA DE SOFT DELETE
+                if (photo.getSavedInGallery() != null && photo.getSavedInGallery()) {
+                    // Se está na galeria, apenas marcar como deletada do chat
+                    photo.setDeletedFromChat(true);
+                    photoRepository.save(photo);
+                    log.info("✅ Foto marcada como deletada do chat, mas mantida na galeria - MessageId: {}", messageId);
+                } else {
+                    // Se não está na galeria, deletar permanentemente
+                    photoRepository.delete(photo);
+                    log.info("✅ Foto excluída permanentemente do banco - MessageId: {}", messageId);
+                }
+            } else {
+                log.warn("⚠️ Foto não encontrada no banco - MessageId: {}", messageId);
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao excluir foto do banco", e);
+            throw new RuntimeException("Erro ao excluir foto: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ MODIFICADO: Converter para DTO (adicionado caption e deletedFromChat)
      */
     private PhotoDTO convertToDTO(Photo photo) {
         return PhotoDTO.builder()
@@ -305,7 +350,7 @@ public class PhotoService {
                 .width(photo.getWidth())
                 .height(photo.getHeight())
                 .mimeType(photo.getMimeType())
-                .caption(photo.getCaption())  // ✅ NOVO: Incluir caption
+                .caption(photo.getCaption())
                 .isStatusReply(photo.getIsStatusReply())
                 .isEdit(photo.getIsEdit())
                 .isGroup(photo.getIsGroup())
@@ -315,6 +360,7 @@ public class PhotoService {
                 .senderName(photo.getSenderName())
                 .status(photo.getStatus())
                 .savedInGallery(photo.getSavedInGallery())
+                .deletedFromChat(photo.getDeletedFromChat()) // ✅ NOVO
                 .build();
     }
 }

@@ -154,6 +154,25 @@ public class DocumentService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * âœ… NOVO: Excluir documento do banco de dados
+     */
+    @Transactional
+    public void deleteDocument(String messageId) {
+        try {
+            log.info("ðŸ—'️ Excluindo documento - MessageId: {}", messageId);
+
+            documentRepository.findByMessageId(messageId).ifPresent(document -> {
+                documentRepository.delete(document);
+                log.info("âœ… Documento excluído do banco - MessageId: {}", messageId);
+            });
+
+        } catch (Exception e) {
+            log.error("â Erro ao excluir documento do banco", e);
+            throw new RuntimeException("Erro ao excluir documento: " + e.getMessage(), e);
+        }
+    }
+
     private DocumentDTO toDTO(Document document) {
         DocumentDTO dto = new DocumentDTO();
         dto.setId(document.getId());

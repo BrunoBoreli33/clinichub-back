@@ -101,6 +101,7 @@ public class VideoService {
         video.setSenderName(senderName);
         video.setStatus(status != null ? status : "PENDING");
         video.setSavedInGallery(false);
+        video.setDeletedFromChat(false); // ✅ NOVO: Inicializar
 
         Video saved = videoRepository.save(video);
         log.info("✅ Vídeo criado - MessageId: {}, ChatId: {}, VideoUrl: {}, Seconds: {}, Caption: {}",
@@ -110,7 +111,7 @@ public class VideoService {
     }
 
     /**
-     * Buscar vídeos de um chat
+     * ✅ MODIFICADO: Buscar vídeos de um chat - Filtrar deletados
      */
     public List<VideoDTO> getVideosByChatId(String chatId) {
         if (!chatRepository.existsById(chatId)) {
@@ -120,6 +121,7 @@ public class VideoService {
         List<Video> videos = videoRepository.findByChatIdOrderByTimestampAsc(chatId);
 
         return videos.stream()
+                .filter(video -> video.getDeletedFromChat() == null || !video.getDeletedFromChat())
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
@@ -136,19 +138,26 @@ public class VideoService {
     }
 
     /**
-     * Marcar/desmarcar vídeo como salvo na galeria
+     * ✅ MODIFICADO: Marcar/desmarcar vídeo como salvo na galeria + verificar delete permanente
      */
     @Transactional
     public VideoDTO toggleVideoInGallery(String videoId) {
         Video video = videoRepository.findById(videoId)
                 .orElseThrow(() -> new RuntimeException("Vídeo não encontrado"));
 
-        video.setSavedInGallery(!video.getSavedInGallery());
+        boolean wasInGallery = video.getSavedInGallery();
+        video.setSavedInGallery(!wasInGallery);
         Video updated = videoRepository.save(video);
 
         log.info("✅ Vídeo {} {} na galeria",
                 video.getSavedInGallery() ? "salvo" : "removido",
                 video.getSavedInGallery() ? "para" : "da");
+
+        // ✅ NOVO: Se removeu da galeria E já estava deletado do chat, deletar permanentemente
+        if (!video.getSavedInGallery() && video.getDeletedFromChat() != null && video.getDeletedFromChat()) {
+            log.info("🗑️ Vídeo removido da galeria e já deletado do chat - deletando permanentemente");
+            videoRepository.delete(video);
+        }
 
         return convertToDTO(updated);
     }
@@ -177,6 +186,7 @@ public class VideoService {
             video.setSavedInGallery(false);
             video.setPhone(phone);
             video.setInstanceId(instanceId);
+            video.setDeletedFromChat(false); // ✅ NOVO
 
             // ✅ Se videoId fornecido, copiar informações do vídeo original
             if (videoId != null && !videoId.isEmpty()) {
@@ -282,6 +292,7 @@ public class VideoService {
             video.setWidth(0);
             video.setHeight(0);
             video.setSeconds(0);
+            video.setDeletedFromChat(false); // ✅ NOVO
 
             // ✅ Verificar se deve salvar na galeria automaticamente
             boolean shouldSaveInGallery = user.getUploadPhoneNumber() != null
@@ -300,7 +311,41 @@ public class VideoService {
     }
 
     /**
-     * Converter para DTO
+     * ✅ MODIFICADO: Excluir vídeo com soft delete baseado na galeria
+     */
+    @Transactional
+    public void deleteVideo(String messageId) {
+        try {
+            log.info("🗑️ Excluindo vídeo - MessageId: {}", messageId);
+
+            Optional<Video> videoOpt = videoRepository.findByMessageId(messageId);
+
+            if (videoOpt.isPresent()) {
+                Video video = videoOpt.get();
+
+                // ✅ LÓGICA DE SOFT DELETE
+                if (video.getSavedInGallery() != null && video.getSavedInGallery()) {
+                    // Se está na galeria, apenas marcar como deletado do chat
+                    video.setDeletedFromChat(true);
+                    videoRepository.save(video);
+                    log.info("✅ Vídeo marcado como deletado do chat, mas mantido na galeria - MessageId: {}", messageId);
+                } else {
+                    // Se não está na galeria, deletar permanentemente
+                    videoRepository.delete(video);
+                    log.info("✅ Vídeo excluído permanentemente do banco - MessageId: {}", messageId);
+                }
+            } else {
+                log.warn("⚠️ Vídeo não encontrado no banco - MessageId: {}", messageId);
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao excluir vídeo do banco", e);
+            throw new RuntimeException("Erro ao excluir vídeo: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ✅ MODIFICADO: Converter para DTO (adicionado deletedFromChat)
      */
     private VideoDTO convertToDTO(Video video) {
         return VideoDTO.builder()
@@ -327,6 +372,7 @@ public class VideoService {
                 .senderName(video.getSenderName())
                 .status(video.getStatus())
                 .savedInGallery(video.getSavedInGallery())
+                .deletedFromChat(video.getDeletedFromChat()) // ✅ NOVO
                 .build();
     }
 }

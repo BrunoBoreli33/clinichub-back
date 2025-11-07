@@ -95,6 +95,10 @@ public class Video {
     @Column(name = "saved_in_gallery", nullable = false)
     private Boolean savedInGallery = false;
 
+    // ✅ NOVO: Flag para soft delete - vídeo deletado do chat mas mantido na galeria
+    @Column(name = "deleted_from_chat", nullable = false)
+    private Boolean deletedFromChat = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -105,6 +109,9 @@ public class Video {
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
+        if (this.deletedFromChat == null) {
+            this.deletedFromChat = false;
+        }
     }
 
     @PreUpdate

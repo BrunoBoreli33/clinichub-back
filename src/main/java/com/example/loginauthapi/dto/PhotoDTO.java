@@ -20,10 +20,7 @@ public class PhotoDTO {
     private Integer width;
     private Integer height;
     private String mimeType;
-
-    // ✅ NOVO: Campo caption para armazenar comentário da foto
     private String caption;
-
     private Boolean isStatusReply;
     private Boolean isEdit;
     private Boolean isGroup;
@@ -33,4 +30,5 @@ public class PhotoDTO {
     private String senderName;
     private String status;
     private Boolean savedInGallery;
+    private Boolean deletedFromChat; // ✅ NOVO
 }
