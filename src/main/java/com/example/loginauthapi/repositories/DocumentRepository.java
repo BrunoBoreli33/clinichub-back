@@ -12,5 +12,6 @@ import java.util.Optional;
 public interface DocumentRepository extends JpaRepository<Document, String> {
     List<Document> findByChatOrderByTimestampAsc(Chat chat);
     Optional<Document> findByMessageId(String messageId);
+    Optional<Document> findTopByChatIdOrderByTimestampDesc(String chatId);
     List<Document> findByChatIdOrderByTimestampDesc(String chatId);
 }
