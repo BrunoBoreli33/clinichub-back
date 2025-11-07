@@ -226,6 +226,29 @@ public class MessageService {
     }
 
     /**
+     * ✅ NOVO: Excluir mensagem do banco de dados
+     */
+    @Transactional
+    public void deleteMessage(String messageId) {
+        try {
+            log.info("🗑️ Excluindo mensagem - MessageId: {}", messageId);
+
+            Optional<Message> messageOpt = messageRepository.findByMessageId(messageId);
+
+            if (messageOpt.isPresent()) {
+                messageRepository.delete(messageOpt.get());
+                log.info("✅ Mensagem excluída do banco - MessageId: {}", messageId);
+            } else {
+                log.warn("⚠️ Mensagem não encontrada no banco - MessageId: {}", messageId);
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao excluir mensagem do banco", e);
+            throw new RuntimeException("Erro ao excluir mensagem: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * ✅ MODIFICADO: Converter para DTO incluindo campos de áudio
      */
     private MessageDTO convertToDTO(Message message) {

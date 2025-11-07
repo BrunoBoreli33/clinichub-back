@@ -13,13 +13,12 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "videos", indexes = {
-        @Index(name = "idx_video_chat_id", columnList = "chat_id"),
-        @Index(name = "idx_video_message_id", columnList = "message_id"),
-        @Index(name = "idx_video_timestamp", columnList = "timestamp"),
-        @Index(name = "idx_video_saved_in_gallery", columnList = "saved_in_gallery")
+@Table(name = "documents", indexes = {
+        @Index(name = "idx_document_chat_id", columnList = "chat_id"),
+        @Index(name = "idx_document_message_id", columnList = "message_id"),
+        @Index(name = "idx_document_timestamp", columnList = "timestamp")
 })
-public class Video {
+public class Document {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -44,29 +43,23 @@ public class Video {
     @Column(nullable = false)
     private LocalDateTime timestamp;
 
-    @Column(name = "video_url", nullable = false, columnDefinition = "TEXT")
-    private String videoUrl;
+    @Column(name = "document_url", nullable = false, columnDefinition = "TEXT")
+    private String documentUrl;
 
-    @Column(columnDefinition = "TEXT")
-    private String caption;
+    @Column(name = "file_name")
+    private String fileName;
 
     @Column(name = "mime_type")
     private String mimeType;
 
-    @Column(nullable = false)
-    private Integer width;
+    @Column(name = "page_count")
+    private Integer pageCount;
 
-    @Column(nullable = false)
-    private Integer height;
+    @Column(name = "title")
+    private String title;
 
-    @Column(nullable = false)
-    private Integer seconds;
-
-    @Column(name = "view_once")
-    private Boolean viewOnce = false;
-
-    @Column(name = "is_gif")
-    private Boolean isGif = false;
+    @Column(name = "caption", columnDefinition = "TEXT")
+    private String caption;
 
     @Column(name = "is_status_reply")
     private Boolean isStatusReply = false;
@@ -92,13 +85,6 @@ public class Video {
     @Column(length = 20)
     private String status;
 
-    @Column(name = "saved_in_gallery", nullable = false)
-    private Boolean savedInGallery = false;
-
-    // ✅ NOVO: Flag para soft delete - vídeo deletado do chat mas mantido na galeria
-    @Column(name = "deleted_from_chat", nullable = false)
-    private Boolean deletedFromChat = false;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -109,9 +95,6 @@ public class Video {
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
-        if (this.deletedFromChat == null) {
-            this.deletedFromChat = false;
-        }
     }
 
     @PreUpdate

@@ -1,25 +1,28 @@
 package com.example.loginauthapi.dto;
 
 import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-@Data
-@Builder
+import java.time.LocalDateTime;
+
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class PhotoDTO {
+public class DocumentDTO {
     private String id;
     private String messageId;
     private String instanceId;
     private String phone;
     private Boolean fromMe;
-    private String timestamp;
-    private String imageUrl;
-    private Integer width;
-    private Integer height;
+    private LocalDateTime timestamp;
+    private String documentUrl;
+    private String fileName;
     private String mimeType;
+    private Integer pageCount;
+    private String title;
     private String caption;
     private Boolean isStatusReply;
     private Boolean isEdit;
@@ -29,6 +32,4 @@ public class PhotoDTO {
     private String chatName;
     private String senderName;
     private String status;
-    private Boolean savedInGallery;
-    private Boolean deletedFromChat; // ✅ NOVO
 }
