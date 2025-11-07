@@ -233,4 +233,57 @@ public class ZapiMessageService {
             throw new RuntimeException("Erro ao editar mensagem via Z-API: " + e.getMessage(), e);
         }
     }
+
+    /**
+     * ✅ NOVO: Enviar documento via Z-API
+     */
+    public Map<String, Object> sendDocument(WebInstance instance, String phone,
+                                            String document, String fileName,
+                                            String caption, String extension) {
+        try {
+            String url = String.format("%s/instances/%s/token/%s/send-document/%s",
+                    ZAPI_BASE_URL,
+                    instance.getSuaInstancia(),
+                    instance.getSeuToken(),
+                    extension);
+
+            log.info("📄 Enviando documento para: {} - Extension: {}", phone, extension);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Client-Token", instance.getClientToken());
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("phone", phone);
+            body.put("document", document);
+
+            if (fileName != null && !fileName.isEmpty()) {
+                body.put("fileName", fileName);
+            }
+
+            if (caption != null && !caption.isEmpty()) {
+                body.put("caption", caption);
+            }
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    Map.class
+            );
+
+            Map<String, Object> result = response.getBody();
+            log.info("✅ Documento enviado com sucesso - MessageId: {}",
+                    result != null ? result.get("messageId") : "N/A");
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar documento", e);
+            throw new RuntimeException("Erro ao enviar documento via Z-API: " + e.getMessage(), e);
+        }
+    }
 }

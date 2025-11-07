@@ -1,6 +1,7 @@
 package com.example.loginauthapi.controllers;
 
 import com.example.loginauthapi.dto.AudioDTO;
+import com.example.loginauthapi.dto.DocumentDTO;
 import com.example.loginauthapi.dto.MessageDTO;
 import com.example.loginauthapi.dto.PhotoDTO;
 import com.example.loginauthapi.dto.VideoDTO;
@@ -8,6 +9,7 @@ import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.AudioService;
+import com.example.loginauthapi.services.DocumentService;
 import com.example.loginauthapi.services.MessageService;
 import com.example.loginauthapi.services.PhotoService;
 import com.example.loginauthapi.services.VideoService;
@@ -33,6 +35,7 @@ public class MessageController {
     private final AudioService audioService;
     private final PhotoService photoService;
     private final VideoService videoService;
+    private final DocumentService documentService;
     private final ZapiMessageService zapiMessageService;
     private final WebInstanceRepository webInstanceRepository;
 
@@ -96,19 +99,24 @@ public class MessageController {
             // ✅ Buscar vídeos
             List<VideoDTO> videos = videoService.getVideosByChatId(chatId);
 
-            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}, Fotos: {}, Vídeos: {}",
-                    messages.size(), audios.size(), photos.size(), videos.size());
+            // ✅ Buscar documentos
+            List<DocumentDTO> documents = documentService.getDocumentsByChat(chatId);
 
-            return ResponseEntity.ok(Map.of(
-                    "success", true,
-                    "messages", messages,
-                    "audios", audios,
-                    "photos", photos,
-                    "videos", videos,
-                    "totalMessages", messages.size(),
-                    "totalAudios", audios.size(),
-                    "totalPhotos", photos.size(),
-                    "totalVideos", videos.size()
+            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}, Fotos: {}, Vídeos: {}, Documentos: {}",
+                    messages.size(), audios.size(), photos.size(), videos.size(), documents.size());
+
+            return ResponseEntity.ok(Map.ofEntries(
+                    Map.entry("success", true),
+                    Map.entry("messages", messages),
+                    Map.entry("audios", audios),
+                    Map.entry("photos", photos),
+                    Map.entry("videos", videos),
+                    Map.entry("documents", documents),
+                    Map.entry("totalMessages", messages.size()),
+                    Map.entry("totalAudios", audios.size()),
+                    Map.entry("totalPhotos", photos.size()),
+                    Map.entry("totalVideos", videos.size()),
+                    Map.entry("totalDocuments", documents.size())
             ));
         } catch (Exception e) {
             log.error("❌ Erro ao buscar mensagens - ChatId: {}, Erro: {}", chatId, e.getMessage(), e);
@@ -665,6 +673,70 @@ public class MessageController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                     "success", false,
                     "message", "Erro ao editar mensagem: " + e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * POST /dashboard/messages/upload-document
+     * ✅ CORRIGIDO: NÃO salva Base64 no banco, apenas envia via Z-API
+     * O webhook vai salvar com documentUrl correto
+     */
+    @PostMapping("/upload-document")
+    public ResponseEntity<Map<String, Object>> uploadDocument(@RequestBody Map<String, Object> body) {
+        try {
+            log.info("📤 Requisição para upload de documento");
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            String phone = (String) body.get("phone");
+            String document = (String) body.get("document");
+            String fileName = (String) body.get("fileName");
+            String caption = (String) body.get("caption");
+
+            if (phone == null || document == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "Phone e document são obrigatórios"
+                ));
+            }
+
+            // ✅ CORREÇÃO: NÃO salva no banco antes de enviar
+            // O webhook vai salvar quando o documento for enviado
+
+            // Determinar extensão do arquivo e remover do fileName
+            String extension = "pdf"; // default
+            String fileNameWithoutExtension = fileName;
+
+            if (fileName != null && fileName.contains(".")) {
+                int lastDotIndex = fileName.lastIndexOf(".");
+                extension = fileName.substring(lastDotIndex + 1).toLowerCase();
+                fileNameWithoutExtension = fileName.substring(0, lastDotIndex);
+            }
+
+            // Enviar via Z-API (SEM extensão no fileName pois Z-API adiciona automaticamente)
+            log.info("📨 Enviando documento via Z-API - Phone: {}, FileName: {}, Extension: {}",
+                    phone, fileNameWithoutExtension, extension);
+            Map<String, Object> zapiResult = zapiMessageService.sendDocument(
+                    instance, phone, document, fileNameWithoutExtension, caption, extension
+            );
+
+            log.info("✅ Documento enviado via Z-API - Aguardando webhook salvar");
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Documento enviado com sucesso",
+                    "messageId", zapiResult != null && zapiResult.containsKey("messageId")
+                            ? zapiResult.get("messageId")
+                            : null
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao fazer upload de documento: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao fazer upload de documento: " + e.getMessage()
             ));
         }
     }

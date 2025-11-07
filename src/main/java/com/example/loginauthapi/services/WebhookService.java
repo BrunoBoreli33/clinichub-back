@@ -9,6 +9,7 @@ import com.example.loginauthapi.repositories.ChatRoutineStateRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.repositories.PhotoRepository;
 import com.example.loginauthapi.repositories.VideoRepository;
+import com.example.loginauthapi.repositories.DocumentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,7 @@ public class WebhookService {
     private final AudioService audioService;
     private final PhotoService photoService;
     private final VideoService videoService;
+    private final DocumentService documentService;
     private final ChatRepository chatRepository;
     private final WebInstanceRepository webInstanceRepository;
     private final NotificationService notificationService;
@@ -38,6 +40,7 @@ public class WebhookService {
 
     private final PhotoRepository photoRepository;
     private final VideoRepository videoRepository;
+    private final DocumentRepository documentRepository;
 
     // Constante para identificar a coluna de repescagem
     private static final String REPESCAGEM_COLUMN = "followup";
@@ -102,6 +105,18 @@ public class WebhookService {
             if (videoObj != null) {
                 // ✅ PROCESSAR VÍDEO
                 processVideo(payload, videoObj, fromMe, momment, connectedPhone, phone,
+                        instanceId, messageId, chatName, senderName, status,
+                        senderPhoto, isForwarded, isGroup);
+                return;
+            }
+
+            // ✅ NOVO: Verificar se é documento
+            @SuppressWarnings("unchecked")
+            Map<String, Object> documentObj = (Map<String, Object>) payload.get("document");
+
+            if (documentObj != null) {
+                // ✅ PROCESSAR DOCUMENTO
+                processDocument(payload, documentObj, fromMe, momment, connectedPhone, phone,
                         instanceId, messageId, chatName, senderName, status,
                         senderPhoto, isForwarded, isGroup);
                 return;
@@ -757,6 +772,157 @@ public class WebhookService {
 
         } catch (Exception e) {
             log.error("❌ Erro ao enviar atualização de chat via SSE", e);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Processar documento recebido via webhook
+     */
+    @Transactional
+    public void processDocument(Map<String, Object> payload, Map<String, Object> documentObj,
+                                Boolean fromMe, Long momment, String connectedPhone, String phone,
+                                String instanceId, String messageId, String chatName, String senderName,
+                                String status, String senderPhoto, Boolean isForwarded, Boolean isGroup) {
+        try {
+            log.info("📄 Processando documento do webhook");
+
+            // ===== EXTRAIR DADOS DO DOCUMENTO =====
+            String documentUrl = (String) documentObj.get("documentUrl");
+            String caption = (String) documentObj.get("caption");
+            String fileName = (String) documentObj.get("fileName");
+            String mimeType = (String) documentObj.get("mimeType");
+            String title = (String) documentObj.get("title");
+            Integer pageCount = documentObj.get("pageCount") != null ?
+                    ((Number) documentObj.get("pageCount")).intValue() : null;
+
+            Boolean isStatusReply = (Boolean) payload.get("isStatusReply");
+            Boolean isEdit = (Boolean) payload.get("isEdit");
+            Boolean isNewsletter = (Boolean) payload.get("isNewsletter");
+
+            log.info("📄 Dados do documento - DocumentUrl: {}, FileName: {}, Caption: {}",
+                    documentUrl != null ? "presente" : "null", fileName, caption != null ? "presente" : "null");
+
+            // ===== BUSCAR INSTÂNCIA POR INSTANCE ID =====
+            Optional<WebInstance> instanceOpt = Optional.empty();
+
+            if (instanceId != null && !instanceId.trim().isEmpty()) {
+                instanceOpt = webInstanceRepository.findBySuaInstancia(instanceId);
+            }
+
+            if (instanceOpt.isEmpty() && connectedPhone != null) {
+                instanceOpt = webInstanceRepository.findByConnectedPhone(connectedPhone);
+            }
+
+            if (instanceOpt.isEmpty()) {
+                log.warn("⚠️ WebInstance não encontrada - InstanceId: {}, ConnectedPhone: {}",
+                        instanceId, connectedPhone);
+                return;
+            }
+
+            WebInstance instance = instanceOpt.get();
+            log.info("✅ Instância encontrada - ID: {}, User: {}",
+                    instance.getId(), instance.getUser().getEmail());
+
+            // ===== BUSCAR OU CRIAR CHAT =====
+            Optional<Chat> chatOpt = chatRepository.findByWebInstanceIdAndPhone(instance.getId(), phone);
+            Chat chat;
+            boolean isNewChat = false;
+
+            if (chatOpt.isEmpty()) {
+                // ✅ CRIAR NOVO CHAT
+                log.info("📄 Criando novo chat para documento - Phone: {}", phone);
+                chat = new Chat();
+                chat.setWebInstance(instance);
+                chat.setPhone(phone);
+                chat.setName(chatName != null ? chatName : phone);
+                chat.setIsGroup(isGroup != null ? isGroup : false);
+                chat.setUnread(fromMe ? 0 : 1);
+                chat.setColumn("inbox");
+                chat.setLastMessageTime(LocalDateTime.ofInstant(
+                        java.time.Instant.ofEpochMilli(momment),
+                        java.time.ZoneId.systemDefault()
+                ));
+
+                // Definir caption ou mensagem padrão
+                if (caption != null && !caption.isEmpty()) {
+                    chat.setLastMessageContent(caption);
+                } else {
+                    chat.setLastMessageContent("📄 " + (fileName != null ? fileName : "Documento"));
+                }
+
+                chat = chatRepository.save(chat);
+                isNewChat = true;
+            } else {
+                chat = chatOpt.get();
+                log.info("📄 Chat encontrado - ChatId: {}", chat.getId());
+
+                if (!fromMe) {
+                    chat.setUnread(chat.getUnread() + 1);
+                }
+            }
+
+            // ✅ CORREÇÃO: Verificar se documento já existe antes de salvar (evita duplicação)
+            Optional<com.example.loginauthapi.entities.Document> existingDoc =
+                    documentRepository.findByMessageId(messageId);
+
+            if (existingDoc.isPresent()) {
+                // Documento já existe, apenas atualizar dados se necessário
+                com.example.loginauthapi.entities.Document doc = existingDoc.get();
+                log.info("ℹ️ Documento já existe, atualizando - MessageId: {}", messageId);
+
+                // Atualizar com dados do webhook (documentUrl correto)
+                doc.setDocumentUrl(documentUrl);
+                doc.setStatus(status);
+                doc.setFileName(fileName);
+                doc.setMimeType(mimeType);
+                doc.setPageCount(pageCount);
+                doc.setTitle(title);
+                doc.setCaption(caption);
+
+                documentRepository.save(doc);
+                log.info("✅ Documento atualizado - MessageId: {}", messageId);
+            } else {
+                // Documento não existe, criar novo
+                log.info("💾 Salvando novo documento - MessageId: {}", messageId);
+
+                // ===== SALVAR DOCUMENTO =====
+                documentService.saveIncomingDocument(
+                        chat.getId(), messageId, instanceId, phone, fromMe, momment,
+                        documentUrl, fileName, mimeType, pageCount, title, caption,
+                        isStatusReply, isEdit, isGroup, isNewsletter, isForwarded,
+                        chatName, senderName, status
+                );
+            }
+
+            // ===== ATUALIZAR lastMessageTime =====
+            chat.setLastMessageTime(LocalDateTime.ofInstant(
+                    java.time.Instant.ofEpochMilli(momment),
+                    java.time.ZoneId.systemDefault()
+            ));
+
+            // Atualizar lastMessageContent
+            if (caption != null && !caption.isEmpty()) {
+                chat.setLastMessageContent(caption);
+            } else {
+                chat.setLastMessageContent("📄 " + (fileName != null ? fileName : "Documento"));
+            }
+
+            chat = chatRepository.save(chat);
+
+            log.info("✅ Documento processado com sucesso - MessageId: {}, Chat: {}", messageId, chat.getId());
+
+            // ✅ VERIFICAR SE DEVE REMOVER DA REPESCAGEM
+            checkAndRemoveFromRepescagem(chat, fromMe, instance);
+
+            // ===== ENVIAR NOTIFICAÇÃO SSE =====
+            if (!fromMe) {
+                sendNotificationToUser(instance.getUser().getId(), chat, chat.getLastMessageContent(), isNewChat);
+            } else {
+                sendChatUpdateToUser(instance.getUser().getId(), chat);
+            }
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao processar documento", e);
         }
     }
 
