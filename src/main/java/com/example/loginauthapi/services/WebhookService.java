@@ -42,6 +42,9 @@ public class WebhookService {
     private final VideoRepository videoRepository;
     private final DocumentRepository documentRepository;
 
+    // ✅ NOVO: Injeção para Reply Service
+    private final ReplyService replyService;
+
     // Constante para identificar a coluna de repescagem
     private static final String REPESCAGEM_COLUMN = "followup";
 
@@ -73,6 +76,9 @@ public class WebhookService {
             String senderPhoto = (String) payload.get("senderPhoto");
             Boolean isForwarded = (Boolean) payload.get("forwarded");
             Boolean isGroup = (Boolean) payload.get("isGroup");
+
+            // ✅ NOVO: Extrair referenceMessageId para detectar replies
+            String referenceMessageId = (String) payload.get("referenceMessageId");
 
             // ✅ NOVO: Verificar se é imagem
             @SuppressWarnings("unchecked")
@@ -235,6 +241,39 @@ public class WebhookService {
                     isGroup != null ? isGroup : false
             );
 
+            // ✅ NOVO: Se tiver referenceMessageId, é um reply
+            if (referenceMessageId != null && !referenceMessageId.isEmpty()) {
+                log.info("💬 Detectado reply - MessageId: {}, ReferenceId: {}",
+                        messageId, referenceMessageId);
+
+                // Determinar o tipo de reply baseado no conteúdo referenciado
+                String replyType = determineReplyType(referenceMessageId);
+
+                // Salvar o reply baseado no tipo
+                switch (replyType) {
+                    case "image":
+                        replyService.saveImageReply(messageId, referenceMessageId, chat.getId(),
+                                content, fromMe, momment);
+                        break;
+                    case "audio":
+                        replyService.saveAudioReply(messageId, referenceMessageId, chat.getId(),
+                                content, fromMe, momment);
+                        break;
+                    case "video":
+                        replyService.saveVideoReply(messageId, referenceMessageId, chat.getId(),
+                                content, fromMe, momment);
+                        break;
+                    case "document":
+                        replyService.saveDocumentReply(messageId, referenceMessageId, chat.getId(),
+                                content, fromMe, momment);
+                        break;
+                    default:
+                        replyService.saveTextReply(messageId, referenceMessageId, chat.getId(),
+                                content, fromMe, momment);
+                        break;
+                }
+            }
+
             // ✅ ATUALIZAR lastMessageTime do chat
             chat.setLastMessageTime(LocalDateTime.ofInstant(
                     java.time.Instant.ofEpochMilli(momment),
@@ -255,6 +294,30 @@ public class WebhookService {
         } catch (Exception e) {
             log.error("❌ Erro ao processar mensagem", e);
         }
+    }
+
+    /**
+     * ✅ NOVO: Determinar tipo de reply baseado na mensagem referenciada
+     */
+    private String determineReplyType(String referenceMessageId) {
+        // Verificar se é uma foto
+        if (photoRepository.findByMessageId(referenceMessageId).isPresent()) {
+            return "image";
+        }
+        // Verificar se é um áudio
+        if (audioService.findByMessageId(referenceMessageId).isPresent()) {
+            return "audio";
+        }
+        // Verificar se é um vídeo
+        if (videoRepository.findByMessageId(referenceMessageId).isPresent()) {
+            return "video";
+        }
+        // Verificar se é um documento
+        if (documentRepository.findByMessageId(referenceMessageId).isPresent()) {
+            return "document";
+        }
+        // Por padrão, é texto
+        return "text";
     }
 
     /**

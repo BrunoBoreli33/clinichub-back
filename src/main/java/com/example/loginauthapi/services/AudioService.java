@@ -207,6 +207,13 @@ public class AudioService {
     }
 
     /**
+     * Buscar áudio por messageId
+     */
+    public Optional<Audio> findByMessageId(String messageId) {
+        return audioRepository.findByMessageId(messageId);
+    }
+
+    /**
      * Converter para DTO
      */
     private AudioDTO convertToDTO(Audio audio) {
