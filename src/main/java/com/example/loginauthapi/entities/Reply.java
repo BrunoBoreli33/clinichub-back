@@ -59,6 +59,10 @@ public class Reply {
     @Column(name = "reply_type", nullable = false)
     private String replyType; // text, audio, document, image, video
 
+    // ✅ NOVO: Flag para indicar que a mensagem original não foi encontrada
+    @Column(name = "original_message_not_found", nullable = false)
+    private Boolean originalMessageNotFound = false;
+
     @Column(nullable = false)
     private Boolean fromMe;
 
@@ -75,6 +79,9 @@ public class Reply {
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
+        if (this.originalMessageNotFound == null) {
+            this.originalMessageNotFound = false;
+        }
     }
 
     @PreUpdate

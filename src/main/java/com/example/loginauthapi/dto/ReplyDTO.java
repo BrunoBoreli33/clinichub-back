@@ -23,4 +23,7 @@ public class ReplyDTO {
     private String replyType;
     private Boolean fromMe;
     private String timestamp;
+
+    // ✅ NOVO: Flag indicando se a mensagem original foi encontrada
+    private Boolean originalMessageNotFound;
 }

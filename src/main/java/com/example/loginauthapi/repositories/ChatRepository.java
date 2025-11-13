@@ -108,4 +108,35 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
      * Usado para uploads diretos e criação automática de chats
      */
     Optional<Chat> findByPhoneAndWebInstanceId(String phone, String webInstanceId);
+
+    // ============================================
+    // ✅ NOVOS MÉTODOS PARA SUPORTE A LID (WhatsApp Privacy)
+    // ============================================
+
+    /**
+     * Buscar chat por chatLid e webInstanceId
+     * Usado quando o webhook vem com chatLid (número oculto pelo WhatsApp)
+     *
+     * @param webInstanceId ID da instância do WhatsApp
+     * @param chatLid Identificador LID do WhatsApp (ex: "36580504956936@lid")
+     * @return Optional contendo o chat se encontrado
+     */
+    Optional<Chat> findByWebInstanceIdAndChatLid(String webInstanceId, String chatLid);
+
+    /**
+     * Buscar chat por chatLid OU phone
+     * Usado para encontrar chat independente se o número foi revelado ou não
+     * Prioriza busca por chatLid, mas também verifica phone
+     *
+     * @param webInstanceId ID da instância do WhatsApp
+     * @param chatLid Identificador LID do WhatsApp
+     * @param phone Número de telefone
+     * @return Optional contendo o chat se encontrado
+     */
+    @Query("SELECT c FROM Chat c WHERE c.webInstance.id = :webInstanceId AND (c.chatLid = :chatLid OR c.phone = :phone)")
+    Optional<Chat> findByWebInstanceIdAndChatLidOrPhone(
+            @Param("webInstanceId") String webInstanceId,
+            @Param("chatLid") String chatLid,
+            @Param("phone") String phone
+    );
 }

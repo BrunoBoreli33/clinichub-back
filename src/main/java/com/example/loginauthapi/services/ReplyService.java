@@ -262,6 +262,49 @@ public class ReplyService {
         return saved;
     }
 
+    /**
+     * ✅ NOVO: Salvar reply quando mensagem original NÃO foi encontrada
+     */
+    @Transactional
+    public Reply saveReplyWithoutOriginalMessage(String messageId, String referenceMessageId,
+                                                 String chatId, String mensagemEnviada,
+                                                 Boolean fromMe, Long timestamp, String senderName) {
+
+        log.info("⚠️ Salvando reply SEM mensagem original - MessageId: {}, ReferenceId: {}",
+                messageId, referenceMessageId);
+
+        Message message = messageRepository.findByMessageId(messageId)
+                .orElseThrow(() -> new RuntimeException("Mensagem não encontrada"));
+
+        Chat chat = chatRepository.findById(chatId)
+                .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+
+        Optional<Reply> existing = replyRepository.findByMessageMessageId(messageId);
+        if (existing.isPresent()) {
+            log.info("Reply já existe para a mensagem {}", messageId);
+            return existing.get();
+        }
+
+        Reply reply = new Reply();
+        reply.setMessage(message);
+        reply.setReferenceMessageId(referenceMessageId);
+        reply.setChat(chat);
+        reply.setMensagemEnviada(mensagemEnviada);
+        reply.setSenderName(senderName);
+        reply.setOriginalMessageNotFound(true);
+        reply.setReplyType("unknown");
+        reply.setFromMe(fromMe);
+        reply.setTimestamp(LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(timestamp),
+                ZoneId.systemDefault()
+        ));
+
+        Reply saved = replyRepository.save(reply);
+        log.info("✅ Reply sem mensagem original salvo - Id: {}", saved.getId());
+
+        return saved;
+    }
+
     public Optional<Reply> getReplyByMessageId(String messageId) {
         return replyRepository.findByMessageMessageId(messageId);
     }
@@ -285,6 +328,7 @@ public class ReplyService {
                 .replyType(reply.getReplyType())
                 .fromMe(reply.getFromMe())
                 .timestamp(reply.getTimestamp().toString())
+                .originalMessageNotFound(reply.getOriginalMessageNotFound())
                 .build();
     }
 }

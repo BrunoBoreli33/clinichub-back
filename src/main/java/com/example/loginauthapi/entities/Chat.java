@@ -20,13 +20,12 @@ import java.util.Set;
 @Table(name = "chats", indexes = {
         @Index(name = "idx_web_instance_id", columnList = "web_instance_id"),
         @Index(name = "idx_phone", columnList = "phone"),
+        @Index(name = "idx_chat_lid", columnList = "chat_lid"),
         @Index(name = "idx_last_message_time", columnList = "last_message_time"),
         @Index(name = "idx_active_in_zapi", columnList = "active_in_zapi")
-},
-        uniqueConstraints = {
-                @UniqueConstraint(columnNames = {"web_instance_id", "phone"})
-        }
+}
 )
+
 public class Chat {
 
     @Id
@@ -39,8 +38,14 @@ public class Chat {
 
     private String name;
 
-    @Column(nullable = false, unique = false)
+    @Column(nullable = true, unique = false) // ✅ Permitir NULL para chats temporários
     private String phone;
+
+    // ✅ NOVO: Identificador LID do WhatsApp para chats com privacidade ativada
+    // Este campo é usado para identificar chats mesmo quando o número real não foi revelado
+    // Exemplo: "36580504956936@lid"
+    @Column(name = "chat_lid")
+    private String chatLid;
 
     @Column(name = "last_message_time")
     private LocalDateTime lastMessageTime;
@@ -119,6 +124,10 @@ public class Chat {
     // ✅ NOVO: Relacionamento com Video - necessário para cascade delete
     @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Video> videos = new ArrayList<>();
+
+    // ✅ NOVO: Relacionamento com Document - necessário para cascade delete
+    @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Document> documents = new ArrayList<>();
 
     @PrePersist
     public void prePersist() {
