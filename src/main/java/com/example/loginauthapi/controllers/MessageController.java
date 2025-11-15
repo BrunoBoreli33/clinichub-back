@@ -772,6 +772,17 @@ public class MessageController {
 
             boolean owner = Boolean.parseBoolean(ownerStr);
 
+
+            // ✅ NOVO: PASSO 0 - Deletar replies associados
+            log.info("🗑️ Deletando replies associados ao messageId: {}", messageId);
+            try {
+                replyService.deleteRepliesByMessageId(messageId);
+                log.info("✅ Replies deletados com sucesso");
+            } catch (Exception e) {
+                log.error("⚠️ Erro ao deletar replies: {}", e.getMessage());
+                // Continua mesmo se falhar ao deletar replies
+            }
+
             // ✅ PASSO 1: Excluir da Z-API
             log.info("📨 Excluindo mensagem da Z-API - MessageId: {}, Phone: {}, Owner: {}",
                     messageId, phone, owner);

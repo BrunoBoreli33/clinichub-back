@@ -331,4 +331,32 @@ public class ReplyService {
                 .originalMessageNotFound(reply.getOriginalMessageNotFound())
                 .build();
     }
+
+    /**
+     * ✅ NOVO: Deletar todos os replies associados a uma mensagem
+     */
+    @Transactional
+    public void deleteRepliesByMessageId(String messageId) {
+        log.info("🗑️ Deletando replies associados ao messageId: {}", messageId);
+
+        // Buscar replies onde a mensagem é a mensagem de referência
+        List<Reply> repliesAsReference = replyRepository.findByReferenceMessageId(messageId);
+
+        // Buscar replies onde a mensagem é a mensagem de reply
+        Optional<Reply> replyMessage = replyRepository.findByMessageMessageId(messageId);
+
+        // Deletar replies onde a mensagem é referenciada
+        if (!repliesAsReference.isEmpty()) {
+            log.info("📝 Deletando {} replies que referenciam esta mensagem", repliesAsReference.size());
+            replyRepository.deleteAll(repliesAsReference);
+        }
+
+        // Deletar reply onde a mensagem é o reply em si
+        if (replyMessage.isPresent()) {
+            log.info("📝 Deletando reply da mensagem");
+            replyRepository.delete(replyMessage.get());
+        }
+
+        log.info("✅ Replies deletados com sucesso");
+    }
 }
