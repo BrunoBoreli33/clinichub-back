@@ -11,8 +11,11 @@ import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -30,11 +33,13 @@ public class CampaignDispatcherService {
     private final ZapiMessageService zapiMessageService;
     private final MessageService messageService;
 
+    @Autowired
+    private ApplicationContext applicationContext;
+
     /**
      * Executa a cada minuto para verificar campanhas que precisam ser disparadas
      */
     @Scheduled(fixedDelay = 60000) // 60 segundos
-    @Transactional
     public void processCampaigns() {
         try {
             LocalDateTime now = LocalDateTime.now();
@@ -46,9 +51,12 @@ public class CampaignDispatcherService {
 
             log.info("📢 Processando {} campanhas prontas para disparo", campaigns.size());
 
+            // Obter proxy do próprio serviço para garantir que @Transactional funcione
+            CampaignDispatcherService self = applicationContext.getBean(CampaignDispatcherService.class);
+
             for (Campaign campaign : campaigns) {
                 try {
-                    dispatchCampaignBatch(campaign);
+                    self.dispatchCampaignBatch(campaign.getId());
                 } catch (Exception e) {
                     log.error("❌ Erro ao processar campanha {}: {}", campaign.getId(), e.getMessage(), e);
                 }
@@ -58,8 +66,14 @@ public class CampaignDispatcherService {
         }
     }
 
-    @Transactional
-    public void dispatchCampaignBatch(Campaign campaign) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void dispatchCampaignBatch(String campaignId) {
+        Campaign campaign = campaignRepository.findById(campaignId).orElse(null);
+        if (campaign == null) return;
+
+        // Inicializar coleção lazy dentro da transação
+        campaign.getDispatchedChatIds().size();
+
         log.info("📤 Disparando lote da campanha: {} ({}/{})",
                 campaign.getName(), campaign.getDispatchedChats(), campaign.getTotalChats());
 
@@ -122,6 +136,8 @@ public class CampaignDispatcherService {
                 // Adicionar chat à lista de disparados
                 campaign.getDispatchedChatIds().add(chat.getId());
                 successCount++;
+                campaign.setDispatchedChats(campaign.getDispatchedChats() + 1);
+                campaignRepository.save(campaign);
 
                 log.info("✅ Campanha enviada para chat: {} ({})", chat.getName(), chat.getPhone());
 
@@ -133,9 +149,7 @@ public class CampaignDispatcherService {
             }
         }
 
-        // Atualizar contadores da campanha
-        campaign.setDispatchedChats(campaign.getDispatchedChats() + successCount);
-
+        campaign = campaignRepository.findById(campaignId).orElse(campaign);
         // Verificar se a campanha foi concluída
         if (campaign.getDispatchedChats() >= campaign.getTotalChats()) {
             log.info("✅ Campanha {} concluída", campaign.getId());
