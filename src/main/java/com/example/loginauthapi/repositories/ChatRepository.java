@@ -1,6 +1,7 @@
 package com.example.loginauthapi.repositories;
 
 import com.example.loginauthapi.entities.Chat;
+import com.example.loginauthapi.entities.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -138,5 +139,26 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
             @Param("webInstanceId") String webInstanceId,
             @Param("chatLid") String chatLid,
             @Param("phone") String phone
+    );
+
+    // ============================================
+    // ✅ NOVOS MÉTODOS PARA DISPARO DE CAMPANHA
+    // ============================================
+
+    /**
+     * Buscar todos os chats confiáveis de um usuário
+     * Usado para disparo de campanhas com "todos os chats"
+     */
+    @Query("SELECT c FROM Chat c WHERE c.webInstance.user = :user AND c.isTrustworthy = true AND c.activeInZapi = true")
+    List<Chat> findByWebInstance_UserAndIsTrustworthyTrue(@Param("user") User user);
+
+    /**
+     * Buscar chats confiáveis com tags específicas
+     * Usado para disparo de campanhas filtradas por tags
+     */
+    @Query("SELECT DISTINCT c FROM Chat c JOIN c.tags t WHERE c.webInstance.user = :user AND t.id IN :tagIds AND c.isTrustworthy = true AND c.activeInZapi = true")
+    List<Chat> findByWebInstance_UserAndTagsIdInAndIsTrustworthyTrue(
+            @Param("user") User user,
+            @Param("tagIds") List<String> tagIds
     );
 }
