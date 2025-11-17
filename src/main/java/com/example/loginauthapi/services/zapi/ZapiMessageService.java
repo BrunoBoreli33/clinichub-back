@@ -63,6 +63,50 @@ public class ZapiMessageService {
     }
 
     /**
+     * ✅ NOVO: Enviar mensagem de texto com reply via Z-API
+     */
+    public Map<String, Object> sendTextWithReply(WebInstance instance, String phone,
+                                                 String message, String messageId) {
+        try {
+            String url = String.format("%s/instances/%s/token/%s/send-text",
+                    ZAPI_BASE_URL,
+                    instance.getSuaInstancia(),
+                    instance.getSeuToken());
+
+            log.info("💬 Enviando reply para: {} - ReferenceId: {}", phone, messageId);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Client-Token", instance.getClientToken());
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+            Map<String, String> body = new HashMap<>();
+            body.put("phone", phone);
+            body.put("message", message);
+            body.put("messageId", messageId); // ID da mensagem que está sendo respondida
+
+            HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    Map.class
+            );
+
+            Map<String, Object> result = response.getBody();
+            log.info("✅ Reply enviado com sucesso - MessageId: {}",
+                    result != null ? result.get("messageId") : "N/A");
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar reply", e);
+            throw new RuntimeException("Erro ao enviar reply via Z-API: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * ✅ NOVO: Enviar áudio via Z-API
      */
     public Map<String, Object> sendAudio(WebInstance instance, String phone, String audioBase64, Boolean waveform) {

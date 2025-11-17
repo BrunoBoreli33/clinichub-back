@@ -4,14 +4,19 @@ import com.example.loginauthapi.dto.AudioDTO;
 import com.example.loginauthapi.dto.DocumentDTO;
 import com.example.loginauthapi.dto.MessageDTO;
 import com.example.loginauthapi.dto.PhotoDTO;
+import com.example.loginauthapi.dto.ReplyDTO;
 import com.example.loginauthapi.dto.VideoDTO;
+import com.example.loginauthapi.entities.Reply;
 import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
+import com.example.loginauthapi.entities.Chat;
+import com.example.loginauthapi.repositories.ChatRepository;
 import com.example.loginauthapi.services.AudioService;
 import com.example.loginauthapi.services.DocumentService;
 import com.example.loginauthapi.services.MessageService;
 import com.example.loginauthapi.services.PhotoService;
+import com.example.loginauthapi.services.ReplyService;
 import com.example.loginauthapi.services.VideoService;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +29,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/dashboard/messages")
@@ -38,6 +44,8 @@ public class MessageController {
     private final DocumentService documentService;
     private final ZapiMessageService zapiMessageService;
     private final WebInstanceRepository webInstanceRepository;
+    private final ChatRepository chatRepository;
+    private final ReplyService replyService;
 
     private User getAuthenticatedUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -80,7 +88,7 @@ public class MessageController {
 
     /**
      * ✅ MODIFICADO: GET /dashboard/messages/{chatId}
-     * Buscar mensagens, áudios, fotos E vídeos de um chat
+     * Buscar mensagens, áudios, fotos, vídeos, documentos E replies de um chat
      */
     @GetMapping("/{chatId}")
     public ResponseEntity<Map<String, Object>> getMessages(@PathVariable String chatId) {
@@ -102,8 +110,14 @@ public class MessageController {
             // ✅ Buscar documentos
             List<DocumentDTO> documents = documentService.getDocumentsByChat(chatId);
 
-            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}, Fotos: {}, Vídeos: {}, Documentos: {}",
-                    messages.size(), audios.size(), photos.size(), videos.size(), documents.size());
+            // ✅ Buscar replies
+            List<Reply> replies = replyService.getRepliesByChatId(chatId);
+            List<ReplyDTO> repliesDto = replies.stream()
+                    .map(replyService::convertToDTO)
+                    .collect(Collectors.toList());
+
+            log.info("✅ Dados carregados - Mensagens: {}, Áudios: {}, Fotos: {}, Vídeos: {}, Documentos: {}, Replies: {}",
+                    messages.size(), audios.size(), photos.size(), videos.size(), documents.size(), repliesDto.size());
 
             return ResponseEntity.ok(Map.ofEntries(
                     Map.entry("success", true),
@@ -112,11 +126,13 @@ public class MessageController {
                     Map.entry("photos", photos),
                     Map.entry("videos", videos),
                     Map.entry("documents", documents),
+                    Map.entry("replies", repliesDto),
                     Map.entry("totalMessages", messages.size()),
                     Map.entry("totalAudios", audios.size()),
                     Map.entry("totalPhotos", photos.size()),
                     Map.entry("totalVideos", videos.size()),
-                    Map.entry("totalDocuments", documents.size())
+                    Map.entry("totalDocuments", documents.size()),
+                    Map.entry("totalReplies", repliesDto.size())
             ));
         } catch (Exception e) {
             log.error("❌ Erro ao buscar mensagens - ChatId: {}, Erro: {}", chatId, e.getMessage(), e);
@@ -124,6 +140,58 @@ public class MessageController {
                     "success", false,
                     "message", e.getMessage()
             ));
+        }
+    }
+
+    /**
+     * ✅ NOVO: POST /dashboard/messages/reply/{chatId}
+     * Enviar uma mensagem de reply
+     */
+    @PostMapping("/reply/{chatId}")
+    public ResponseEntity<Map<String, Object>> sendReply(
+            @PathVariable String chatId,
+            @RequestBody Map<String, String> request) {
+        try {
+            String content = request.get("content");
+            String referenceMessageId = request.get("referenceMessageId");
+
+            log.info("💬 Enviando reply - ChatId: {}, ReferenceId: {}", chatId, referenceMessageId);
+
+            if (content == null || content.trim().isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Conteúdo da mensagem não pode ser vazio"));
+            }
+
+            if (referenceMessageId == null || referenceMessageId.trim().isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "ID da mensagem de referência é obrigatório"));
+            }
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            Chat chat = chatRepository.findById(chatId).orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+            String phoneNumber = chat.getPhone();
+
+            // Enviar reply via Z-API com o messageId de referência
+            Map<String, Object> zapiResponse = zapiMessageService.sendTextWithReply(
+                    instance,
+                    phoneNumber,
+                    content,
+                    referenceMessageId
+            );
+
+            log.info("✅ Reply enviado com sucesso - Response: {}", zapiResponse);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "zapiResponse", zapiResponse
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar reply", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Erro ao enviar reply: " + e.getMessage()));
         }
     }
 
@@ -703,6 +771,17 @@ public class MessageController {
             }
 
             boolean owner = Boolean.parseBoolean(ownerStr);
+
+
+            // ✅ NOVO: PASSO 0 - Deletar replies associados
+            log.info("🗑️ Deletando replies associados ao messageId: {}", messageId);
+            try {
+                replyService.deleteRepliesByMessageId(messageId);
+                log.info("✅ Replies deletados com sucesso");
+            } catch (Exception e) {
+                log.error("⚠️ Erro ao deletar replies: {}", e.getMessage());
+                // Continua mesmo se falhar ao deletar replies
+            }
 
             // ✅ PASSO 1: Excluir da Z-API
             log.info("📨 Excluindo mensagem da Z-API - MessageId: {}, Phone: {}, Owner: {}",

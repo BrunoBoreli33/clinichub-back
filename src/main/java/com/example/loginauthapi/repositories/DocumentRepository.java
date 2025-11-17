@@ -14,4 +14,7 @@ public interface DocumentRepository extends JpaRepository<Document, String> {
     Optional<Document> findByMessageId(String messageId);
     Optional<Document> findTopByChatIdOrderByTimestampDesc(String chatId);
     List<Document> findByChatIdOrderByTimestampDesc(String chatId);
+
+    // ✅ NOVO MÉTODO NECESSÁRIO: Buscar documentos ordenados por timestamp ascendente
+    List<Document> findByChatIdOrderByTimestampAsc(String chatId);
 }
