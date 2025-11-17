@@ -34,4 +34,7 @@ public class ChatInfoResponseDTO {
 
     // ✅ NOVO: Indica se este chat está oculto
     private Boolean isHidden;
+
+    // ✅ NOVO: Indica se este chat é confiável (para disparo de campanha)
+    private Boolean isTrustworthy;
 }

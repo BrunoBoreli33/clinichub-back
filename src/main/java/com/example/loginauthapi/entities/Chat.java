@@ -85,6 +85,10 @@ public class Chat {
     @Column(name = "is_hidden", nullable = false)
     private Boolean isHidden = false;
 
+    // ✅ NOVO: Indica se este chat é confiável (para disparo de campanha)
+    @Column(name = "is_trustworthy", nullable = false)
+    private Boolean isTrustworthy = false;
+
     // ✅ ALTERADO: De @OneToOne para @OneToMany
     @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Task> tasks = new ArrayList<>();
@@ -142,6 +146,11 @@ public class Chat {
         // ✅ Garantir que isHidden nunca seja null
         if (this.isHidden == null) {
             this.isHidden = false;
+        }
+
+        // ✅ Garantir que isTrustworthy nunca seja null
+        if (this.isTrustworthy == null) {
+            this.isTrustworthy = false;
         }
     }
 

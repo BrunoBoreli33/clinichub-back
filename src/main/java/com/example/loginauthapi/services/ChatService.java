@@ -642,6 +642,7 @@ public class ChatService {
                 .tags(tagDtos)
                 .isUploadChat(chat.getIsUploadChat() != null ? chat.getIsUploadChat() : false)
                 .isHidden(chat.getIsHidden() != null ? chat.getIsHidden() : false)
+                .isTrustworthy(chat.getIsTrustworthy() != null ? chat.getIsTrustworthy() : false)
                 .build();
     }
 }

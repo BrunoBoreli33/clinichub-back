@@ -247,4 +247,54 @@ public class ChatController {
             ));
         }
     }
+
+    /**
+     * ✅ NOVO: PATCH /dashboard/chats/{chatId}/toggle-trustworthy
+     * Alterna o estado de confiável do chat (isTrustworthy)
+     */
+    @PatchMapping("/{chatId}/toggle-trustworthy")
+    public ResponseEntity<Map<String, Object>> toggleChatTrustworthy(@PathVariable String chatId) {
+        try {
+            log.info("✅ Alternando estado de confiável do chat {}", chatId);
+
+            User user = getAuthenticatedUser();
+            WebInstance instance = getActiveInstance(user);
+
+            // Busca o chat
+            Chat chat = chatRepository.findById(chatId)
+                    .orElseThrow(() -> new RuntimeException("Chat não encontrado"));
+
+            // Verifica se o chat pertence ao usuário
+            if (!chat.getWebInstance().getId().equals(instance.getId())) {
+                log.warn("⚠️ Tentativa de acesso não autorizado ao chat {}", chatId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "success", false,
+                        "message", "Chat não pertence ao usuário"
+                ));
+            }
+
+            // Alterna o estado de isTrustworthy
+            boolean newTrustworthyState = !chat.getIsTrustworthy();
+            chat.setIsTrustworthy(newTrustworthyState);
+            chatRepository.save(chat);
+
+            log.info("✅ Chat {} marcado como {} pelo usuário {}",
+                    chatId,
+                    newTrustworthyState ? "CONFIÁVEL" : "NÃO CONFIÁVEL",
+                    user.getEmail());
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", newTrustworthyState ? "Chat marcado como confiável" : "Chat desmarcado como confiável",
+                    "isTrustworthy", newTrustworthyState
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao alternar estado de confiável do chat {}", chatId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Erro ao alternar estado de confiável: " + e.getMessage()
+            ));
+        }
+    }
 }
