@@ -152,10 +152,10 @@ public class CampaignService {
         }
 
         campaign.setStatus("EM_ANDAMENTO");
-        campaign.setNextDispatchTime(LocalDateTime.now());
+        campaign.setNextDispatchTime(LocalDateTime.now().plusMinutes(campaign.getIntervalMinutes()));
 
         Campaign saved = campaignRepository.save(campaign);
-        log.info("✅ Campanha iniciada: {}", saved.getId());
+        log.info("✅ Campanha iniciada: {} - Primeiro disparo em {} minutos", saved.getId(), saved.getIntervalMinutes());
 
         return convertToDTO(saved);
     }
