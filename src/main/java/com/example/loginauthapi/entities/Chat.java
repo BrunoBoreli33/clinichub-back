@@ -38,7 +38,7 @@ public class Chat {
 
     private String name;
 
-    @Column(nullable = true, unique = false) // ✅ Permitir NULL para chats temporários
+    @Column(nullable = true, unique = true) // ✅ Permitir NULL para chats temporários
     private String phone;
 
     // ✅ NOVO: Identificador LID do WhatsApp para chats com privacidade ativada

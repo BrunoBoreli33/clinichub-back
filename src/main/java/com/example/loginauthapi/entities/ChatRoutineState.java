@@ -28,6 +28,9 @@ public class ChatRoutineState {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @Column(name = "scheduled_send_time")
+    private LocalDateTime scheduledSendTime;
+
     // Coluna anterior antes de ir para Repescagem
     @Column(nullable = false)
     private String previousColumn;

@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS replies (
                                        message_id VARCHAR(255) NOT NULL,
                                        reference_message_id VARCHAR(255) NOT NULL,
                                        chat_id VARCHAR(255) NOT NULL,
-                                       content TEXT,
+                                       message_content TEXT,
                                        audio_url TEXT,
                                        document_url TEXT,
                                        image_url TEXT,

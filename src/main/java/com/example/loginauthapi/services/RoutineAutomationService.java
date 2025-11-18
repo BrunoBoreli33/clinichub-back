@@ -9,8 +9,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.*;
 import java.util.*;
 
 // Serviço responsável por automatizar o envio de mensagens de rotina para clientes
@@ -252,6 +251,29 @@ public class RoutineAutomationService {
             state.setLastAutomatedMessageSent(LocalDateTime.now());
             chatRoutineStateRepository.save(state);
 
+
+            LocalDateTime now = LocalDateTime.now();
+
+// 1. Caso exista um horário já programado:
+            if (state.getScheduledSendTime() != null) {
+                if (now.isBefore(state.getScheduledSendTime())) {
+                    return; // ainda não chegou o horário de enviar
+                }
+            }
+
+// 2. Caso não seja horário comercial:
+            if (!isBusinessHours(now)) {
+                LocalDateTime scheduled = nextBusinessWindow(now);
+                state.setScheduledSendTime(scheduled);
+                chatRoutineStateRepository.save(state);
+                log.info("⏳ Mensagem reagendada para {} (horário comercial)", scheduled);
+                return;
+            }
+
+// 3. Se chegou aqui → ENVIAR
+            state.setScheduledSendTime(null); // limpa a fila
+
+
             // Envia a mensagem via Z-API (WhatsApp)
             Map<String, Object> result = zapiMessageService.sendTextMessage(
                     webInstance,
@@ -371,6 +393,25 @@ public class RoutineAutomationService {
                 state.setLastRoutineSent(nextSequence);
                 chatRoutineStateRepository.save(state);
 
+// 1. Caso exista um horário já programado:
+                if (state.getScheduledSendTime() != null) {
+                    if (now.isBefore(state.getScheduledSendTime())) {
+                        return; // ainda não chegou o horário de enviar
+                    }
+                }
+
+// 2. Caso não seja horário comercial:
+                if (!isBusinessHours(now)) {
+                    LocalDateTime scheduled = nextBusinessWindow(now);
+                    state.setScheduledSendTime(scheduled);
+                    chatRoutineStateRepository.save(state);
+                    log.info("⏳ Mensagem reagendada para {} (horário comercial)", scheduled);
+                    return;
+                }
+
+// 3. Se chegou aqui → ENVIAR
+                state.setScheduledSendTime(null); // limpa a fil
+
                 sendNextRoutineMessage(chat, user, state, nextRoutine);
             }
         }
@@ -393,6 +434,29 @@ public class RoutineAutomationService {
             WebInstance webInstance = webInstanceOpt.get();
 
             state.setInRepescagem(true);
+
+
+
+            LocalDateTime now = LocalDateTime.now();
+
+// 1. Caso exista um horário já programado:
+            if (state.getScheduledSendTime() != null) {
+                if (now.isBefore(state.getScheduledSendTime())) {
+                    return; // ainda não chegou o horário de enviar
+                }
+            }
+
+// 2. Caso não seja horário comercial:
+            if (!isBusinessHours(now)) {
+                LocalDateTime scheduled = nextBusinessWindow(now);
+                state.setScheduledSendTime(scheduled);
+                chatRoutineStateRepository.save(state);
+                log.info("⏳ Mensagem reagendada para {} (horário comercial)", scheduled);
+                return;
+            }
+
+// 3. Se chegou aqui → ENVIAR
+            state.setScheduledSendTime(null); // limpa a fila
 
             // Envia a mensagem via Z-API (WhatsApp)
             Map<String, Object> result = zapiMessageService.sendTextMessage(
@@ -536,4 +600,42 @@ public class RoutineAutomationService {
             log.error("❌ [CHAT: {}] Erro ao resetar estado de rotina", chatId, e);
         }
     }
+
+    private boolean isBusinessHours(LocalDateTime dateTime) {
+        // Considerar que o servidor pode estar em UTC. Ajustamos para BRT.
+        ZonedDateTime brtTime = dateTime.atZone(ZoneId.of("UTC"))
+                .withZoneSameInstant(ZoneId.of("America/Sao_Paulo"));
+
+        DayOfWeek dow = brtTime.getDayOfWeek();
+        int hour = brtTime.getHour();
+
+        boolean weekday = dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY;
+        boolean businessTime = hour >= 8 && hour < 18;
+
+        return weekday && businessTime;
+    }
+
+    private LocalDateTime nextBusinessWindow(LocalDateTime now) {
+        ZonedDateTime brt = now.atZone(ZoneId.of("UTC"))
+                .withZoneSameInstant(ZoneId.of("America/Sao_Paulo"));
+
+        // Ajusta para 08:00 do próprio dia, caso esteja antes
+        if (isBusinessHours(now)) {
+            return now; // Já está no horário comercial
+        }
+
+        // Avança para o próximo dia útil às 08:00
+        ZonedDateTime next = brt.withHour(8).withMinute(0).withSecond(0).plusDays(1);
+
+        // Pular finais de semana
+        while (next.getDayOfWeek() == DayOfWeek.SATURDAY ||
+                next.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            next = next.plusDays(1);
+        }
+
+        // Volta para LocalDateTime em UTC (para consistência no banco)
+        return next.withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
+    }
+
+
 }
