@@ -62,6 +62,14 @@ public class Campaign {
     @Column(name = "all_trustworthy", nullable = false)
     private Boolean allTrustworthy = false;
 
+    // ✅ NOVO: Armazena os IDs das fotos da galeria a serem enviadas (separados por vírgula)
+    @Column(name = "photo_ids", columnDefinition = "TEXT")
+    private String photoIds;
+
+    // ✅ NOVO: Armazena os IDs dos vídeos da galeria a serem enviados (separados por vírgula)
+    @Column(name = "video_ids", columnDefinition = "TEXT")
+    private String videoIds;
+
     // Armazena os IDs dos chats que já receberam a mensagem
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "campaign_dispatched_chats",
@@ -84,11 +92,40 @@ public class Campaign {
     @PreUpdate
     public void preUpdate() {
         this.atualizadoEm = LocalDateTime.now();
+        // ✅ CRÍTICO: Sempre sincronizar dispatched_chats antes de salvar
+        syncDispatchedChats();
+    }
+
+    @PostLoad
+    public void postLoad() {
+        // ✅ CRÍTICO: Sempre sincronizar dispatched_chats após carregar do banco
+        syncDispatchedChats();
+    }
+
+    /**
+     * ✅ NOVO: Sincroniza o campo dispatched_chats com o tamanho real da lista
+     * Este método garante que o contador sempre reflita a realidade
+     */
+    public void syncDispatchedChats() {
+        if (this.dispatchedChatIds != null) {
+            this.dispatchedChats = this.dispatchedChatIds.size();
+        }
+    }
+
+    /**
+     * ✅ MODIFICADO: Getter que sempre retorna o tamanho real da lista
+     * Ignora o valor do campo e calcula em tempo real
+     */
+    public Integer getDispatchedChats() {
+        if (this.dispatchedChatIds != null) {
+            return this.dispatchedChatIds.size();
+        }
+        return this.dispatchedChats;
     }
 
     // Método auxiliar para calcular a porcentagem de conclusão
     public Double getProgressPercentage() {
         if (totalChats == 0) return 0.0;
-        return (dispatchedChats.doubleValue() / totalChats.doubleValue()) * 100.0;
+        return (getDispatchedChats().doubleValue() / totalChats.doubleValue()) * 100.0;
     }
 }

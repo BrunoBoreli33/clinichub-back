@@ -1,18 +1,25 @@
 package com.example.loginauthapi.services;
 
 import com.example.loginauthapi.dto.MessageDTO;
+import com.example.loginauthapi.dto.PhotoDTO;
+import com.example.loginauthapi.dto.VideoDTO;
 import com.example.loginauthapi.entities.Campaign;
 import com.example.loginauthapi.entities.Chat;
+import com.example.loginauthapi.entities.Photo;
+import com.example.loginauthapi.entities.Video;
 import com.example.loginauthapi.entities.User;
 import com.example.loginauthapi.entities.WebInstance;
 import com.example.loginauthapi.repositories.CampaignRepository;
 import com.example.loginauthapi.repositories.ChatRepository;
+import com.example.loginauthapi.repositories.PhotoRepository;
+import com.example.loginauthapi.repositories.VideoRepository;
 import com.example.loginauthapi.repositories.WebInstanceRepository;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -32,6 +39,10 @@ public class CampaignDispatcherService {
     private final WebInstanceRepository webInstanceRepository;
     private final ZapiMessageService zapiMessageService;
     private final MessageService messageService;
+    private final PhotoService photoService;
+    private final VideoService videoService;
+    private final PhotoRepository photoRepository;
+    private final VideoRepository videoRepository;
 
     @Autowired
     private ApplicationContext applicationContext;
@@ -39,7 +50,7 @@ public class CampaignDispatcherService {
     /**
      * Executa a cada minuto para verificar campanhas que precisam ser disparadas
      */
-    @Scheduled(fixedDelay = 60000) // 60 segundos
+    @Scheduled(fixedDelay = 30000) // 30 segundos
     public void processCampaigns() {
         try {
             LocalDateTime now = LocalDateTime.now();
@@ -107,49 +118,188 @@ public class CampaignDispatcherService {
         }
 
         WebInstance instance = instances.get(0);
-        int successCount = 0;
 
-        // Enviar mensagens
+        // ✅ NOVO: Obter listas de fotos e vídeos da campanha
+        List<Photo> campaignPhotos = getCampaignPhotos(campaign);
+        List<Video> campaignVideos = getCampaignVideos(campaign);
+
+        // Obter proxy para chamar método com nova transação
+        CampaignDispatcherService self = applicationContext.getBean(CampaignDispatcherService.class);
+
+        // Enviar mensagens + mídias
         for (Chat chat : batchChats) {
+            boolean messageSentViaZapi = false;
+
             try {
-                // ✅ CORRIGIDO: Usar MessageService.saveOutgoingMessage + ZapiMessageService
-                // Este é o MESMO método usado pelo ChatWindow para enviar mensagens
-                log.info("💬 Enviando mensagem da campanha para: {} ({})", chat.getName(), chat.getPhone());
+                // ✅ CRÍTICO: Marcar chat como disparado em TRANSAÇÃO SEPARADA
+                boolean wasMarked = self.markChatAsDispatched(campaignId, chat.getId());
 
-                // PASSO 1: Salvar mensagem no banco
-                MessageDTO savedMessage = messageService.saveOutgoingMessage(chat.getId(), campaign.getMessage(), user);
-
-                // PASSO 2: Enviar via Z-API
-                Map<String, Object> zapiResult = zapiMessageService.sendTextMessage(
-                        instance,
-                        chat.getPhone(),
-                        campaign.getMessage()
-                );
-
-                // PASSO 3: Atualizar com messageId real do WhatsApp
-                if (zapiResult != null && zapiResult.containsKey("messageId")) {
-                    String realMessageId = (String) zapiResult.get("messageId");
-                    messageService.updateMessageIdAfterSend(savedMessage.getMessageId(), realMessageId, "SENT");
-                    log.info("✅ Mensagem enviada e salva - MessageId: {}", realMessageId);
+                if (!wasMarked) {
+                    log.warn("⚠️ Chat {} já foi processado anteriormente, pulando...", chat.getId());
+                    continue;
                 }
 
-                // Adicionar chat à lista de disparados
-                campaign.getDispatchedChatIds().add(chat.getId());
-                successCount++;
-                campaign.setDispatchedChats(campaign.getDispatchedChats() + 1);
-                campaignRepository.save(campaign);
+                log.info("💬 Enviando conteúdo da campanha para: {} ({})", chat.getName(), chat.getPhone());
 
-                log.info("✅ Campanha enviada para chat: {} ({})", chat.getName(), chat.getPhone());
+                // ===== PASSO 1: Enviar mensagem de texto =====
+                try {
+                    // Tentar salvar no banco (ignorar erros de duplicação)
+                    MessageDTO savedMessage = null;
+                    try {
+                        savedMessage = messageService.saveOutgoingMessage(chat.getId(), campaign.getMessage(), user);
+                    } catch (DataIntegrityViolationException e) {
+                        log.warn("⚠️ Erro de duplicação ao salvar mensagem no banco. Continuando...");
+                    }
 
-                // Pequeno delay entre envios para evitar bloqueio
+                    // Enviar via Z-API (CRÍTICO)
+                    Map<String, Object> zapiResult = zapiMessageService.sendTextMessage(
+                            instance,
+                            chat.getPhone(),
+                            campaign.getMessage()
+                    );
+
+                    if (zapiResult != null && zapiResult.containsKey("messageId")) {
+                        String realMessageId = (String) zapiResult.get("messageId");
+                        messageSentViaZapi = true;
+                        log.info("✅ Mensagem de texto enviada via Z-API - MessageId: {}", realMessageId);
+
+                        // Tentar atualizar no banco (ignorar erros de duplicação)
+                        if (savedMessage != null) {
+                            try {
+                                messageService.updateMessageIdAfterSend(savedMessage.getMessageId(), realMessageId, "SENT");
+                            } catch (DataIntegrityViolationException e) {
+                                log.warn("⚠️ Erro de duplicação ao atualizar messageId. Ignorando.");
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("❌ Erro ao enviar mensagem de texto: {}", e.getMessage());
+                    if (!messageSentViaZapi) {
+                        throw e; // Re-lançar apenas se não enviou via Z-API
+                    }
+                }
+
+                // Delay entre mensagem e fotos
+                Thread.sleep(2000);
+
+                // ===== PASSO 2: Enviar fotos (se houver) =====
+                if (!campaignPhotos.isEmpty()) {
+                    log.info("📷 Enviando {} foto(s) para {}", campaignPhotos.size(), chat.getName());
+                    for (Photo photo : campaignPhotos) {
+                        try {
+                            PhotoDTO savedPhoto = null;
+                            try {
+                                savedPhoto = photoService.saveOutgoingPhoto(
+                                        chat.getId(),
+                                        chat.getPhone(),
+                                        photo.getImageUrl(),
+                                        instance.getId(),
+                                        null
+                                );
+                            } catch (DataIntegrityViolationException e) {
+                                log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
+                            }
+
+                            Map<String, Object> photoResult = zapiMessageService.sendImage(
+                                    instance,
+                                    chat.getPhone(),
+                                    photo.getImageUrl()
+                            );
+
+                            if (photoResult != null && photoResult.containsKey("messageId")) {
+                                String photoMessageId = (String) photoResult.get("messageId");
+                                log.info("✅ Foto enviada via Z-API - MessageId: {}", photoMessageId);
+
+                                if (savedPhoto != null) {
+                                    try {
+                                        photoService.updatePhotoIdAfterSend(savedPhoto.getMessageId(), photoMessageId, "SENT");
+                                    } catch (DataIntegrityViolationException e) {
+                                        log.warn("⚠️ Erro de duplicação ao atualizar photo messageId. Ignorando.");
+                                    }
+                                }
+                            }
+
+                            Thread.sleep(2000);
+
+                        } catch (Exception e) {
+                            log.error("❌ Erro ao enviar foto: {}", e.getMessage());
+                        }
+                    }
+                }
+
+                // ===== PASSO 3: Enviar vídeos (se houver) =====
+                if (!campaignVideos.isEmpty()) {
+                    log.info("🎥 Enviando {} vídeo(s) para {}", campaignVideos.size(), chat.getName());
+                    for (Video video : campaignVideos) {
+                        try {
+                            VideoDTO savedVideo = null;
+                            try {
+                                savedVideo = videoService.saveOutgoingVideo(
+                                        chat.getId(),
+                                        chat.getPhone(),
+                                        video.getVideoUrl(),
+                                        instance.getId(),
+                                        null
+                                );
+                            } catch (DataIntegrityViolationException e) {
+                                log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
+                            }
+
+                            Map<String, Object> videoResult = zapiMessageService.sendVideo(
+                                    instance,
+                                    chat.getPhone(),
+                                    video.getVideoUrl()
+                            );
+
+                            if (videoResult != null && videoResult.containsKey("messageId")) {
+                                String videoMessageId = (String) videoResult.get("messageId");
+                                log.info("✅ Vídeo enviado via Z-API - MessageId: {}", videoMessageId);
+
+                                if (savedVideo != null) {
+                                    try {
+                                        videoService.updateVideoIdAfterSend(savedVideo.getMessageId(), videoMessageId, "SENT");
+                                    } catch (DataIntegrityViolationException e) {
+                                        log.warn("⚠️ Erro de duplicação ao atualizar video messageId. Ignorando.");
+                                    }
+                                }
+                            }
+
+                            Thread.sleep(3000);
+
+                        } catch (Exception e) {
+                            log.error("❌ Erro ao enviar vídeo: {}", e.getMessage());
+                        }
+                    }
+                }
+
+                log.info("✅ Campanha enviada completamente para: {} ({})", chat.getName(), chat.getPhone());
+
+                // Delay entre chats
                 Thread.sleep(2000);
 
             } catch (Exception e) {
-                log.error("❌ Erro ao enviar mensagem da campanha para chat {}: {}", chat.getId(), e.getMessage());
+                log.error("❌ Erro CRÍTICO ao processar chat {}: {}", chat.getId(), e.getMessage());
+
+                // ✅ DECISÃO: Apenas desmarcar se NÃO enviou via Z-API
+                if (!messageSentViaZapi) {
+                    log.warn("⚠️ Mensagem NÃO foi enviada. Desmarcando chat {} para nova tentativa.", chat.getId());
+                    self.unmarkChatAsDispatched(campaignId, chat.getId());
+                } else {
+                    log.info("ℹ️ Mensagem foi enviada via Z-API. Mantendo chat {} como disparado.", chat.getId());
+                }
             }
         }
 
+        // ✅ Recarregar campanha para atualizar status
         campaign = campaignRepository.findById(campaignId).orElse(campaign);
+        campaign.getDispatchedChatIds().size(); // Inicializar lazy
+
+        // O contador dispatched_chats é automaticamente sincronizado pelo getter
+        log.info("📊 Status da campanha: {}/{} disparos ({}%)",
+                campaign.getDispatchedChats(),
+                campaign.getTotalChats(),
+                String.format("%.1f", campaign.getProgressPercentage()));
+
         // Verificar se a campanha foi concluída
         if (campaign.getDispatchedChats() >= campaign.getTotalChats()) {
             log.info("✅ Campanha {} concluída", campaign.getId());
@@ -163,12 +313,68 @@ public class CampaignDispatcherService {
         }
 
         campaignRepository.save(campaign);
+    }
 
-        log.info("📊 Campanha {}: {}/{} disparos realizados ({}%)",
-                campaign.getName(),
-                campaign.getDispatchedChats(),
-                campaign.getTotalChats(),
-                String.format("%.1f", campaign.getProgressPercentage()));
+    /**
+     * ✅ Marca o chat como disparado em uma transação SEPARADA
+     * Retorna true se conseguiu marcar, false se já estava marcado
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean markChatAsDispatched(String campaignId, String chatId) {
+        Campaign campaign = campaignRepository.findById(campaignId).orElse(null);
+        if (campaign == null) return false;
+
+        // Inicializar coleção lazy
+        campaign.getDispatchedChatIds().size();
+
+        // Verificar se já foi processado
+        if (campaign.getDispatchedChatIds().contains(chatId)) {
+            log.debug("Chat {} já está na lista de disparados", chatId);
+            return false;
+        }
+
+        // Adicionar à lista
+        campaign.getDispatchedChatIds().add(chatId);
+        campaignRepository.saveAndFlush(campaign);
+
+        log.info("🔒 Chat {} adicionado à lista de disparados (transação commitada)", chatId);
+        return true;
+    }
+
+    /**
+     * ✅ Remove o chat da lista de disparados em caso de erro ANTES do envio
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void unmarkChatAsDispatched(String campaignId, String chatId) {
+        Campaign campaign = campaignRepository.findById(campaignId).orElse(null);
+        if (campaign == null) return;
+
+        campaign.getDispatchedChatIds().size();
+
+        if (campaign.getDispatchedChatIds().remove(chatId)) {
+            campaignRepository.saveAndFlush(campaign);
+            log.warn("🔓 Chat {} removido da lista de disparados devido a erro", chatId);
+        }
+    }
+
+    // ✅ NOVO: Obter fotos da galeria para a campanha
+    private List<Photo> getCampaignPhotos(Campaign campaign) {
+        if (campaign.getPhotoIds() == null || campaign.getPhotoIds().isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<String> photoIds = Arrays.asList(campaign.getPhotoIds().split(","));
+        return photoRepository.findAllById(photoIds);
+    }
+
+    // ✅ NOVO: Obter vídeos da galeria para a campanha
+    private List<Video> getCampaignVideos(Campaign campaign) {
+        if (campaign.getVideoIds() == null || campaign.getVideoIds().isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<String> videoIds = Arrays.asList(campaign.getVideoIds().split(","));
+        return videoRepository.findAllById(videoIds);
     }
 
     private List<Chat> getEligibleChatsForCampaign(Campaign campaign, User user) {

@@ -46,6 +46,16 @@ public class CampaignService {
             campaign.setTagIds(String.join(",", request.tagIds()));
         }
 
+        // ✅ NOVO: Salvar IDs das fotos
+        if (request.photoIds() != null && !request.photoIds().isEmpty()) {
+            campaign.setPhotoIds(String.join(",", request.photoIds()));
+        }
+
+        // ✅ NOVO: Salvar IDs dos vídeos
+        if (request.videoIds() != null && !request.videoIds().isEmpty()) {
+            campaign.setVideoIds(String.join(",", request.videoIds()));
+        }
+
         // Calcular total de chats elegíveis
         List<Chat> eligibleChats = getEligibleChats(user, request.tagIds(), campaign.getAllTrustworthy());
         campaign.setTotalChats(eligibleChats.size());
@@ -106,6 +116,20 @@ public class CampaignService {
             campaign.setTagIds(String.join(",", request.tagIds()));
         } else {
             campaign.setTagIds(null);
+        }
+
+        // ✅ NOVO: Atualizar IDs das fotos
+        if (request.photoIds() != null && !request.photoIds().isEmpty()) {
+            campaign.setPhotoIds(String.join(",", request.photoIds()));
+        } else {
+            campaign.setPhotoIds(null);
+        }
+
+        // ✅ NOVO: Atualizar IDs dos vídeos
+        if (request.videoIds() != null && !request.videoIds().isEmpty()) {
+            campaign.setVideoIds(String.join(",", request.videoIds()));
+        } else {
+            campaign.setVideoIds(null);
         }
 
         // Recalcular total de chats se necessário
@@ -224,6 +248,18 @@ public class CampaignService {
             tagIds = Arrays.asList(campaign.getTagIds().split(","));
         }
 
+        // ✅ NOVO: Converter photoIds para lista
+        List<String> photoIds = null;
+        if (campaign.getPhotoIds() != null && !campaign.getPhotoIds().isEmpty()) {
+            photoIds = Arrays.asList(campaign.getPhotoIds().split(","));
+        }
+
+        // ✅ NOVO: Converter videoIds para lista
+        List<String> videoIds = null;
+        if (campaign.getVideoIds() != null && !campaign.getVideoIds().isEmpty()) {
+            videoIds = Arrays.asList(campaign.getVideoIds().split(","));
+        }
+
         return new CampaignDTO(
                 campaign.getId(),
                 campaign.getName(),
@@ -237,6 +273,8 @@ public class CampaignService {
                 campaign.getNextDispatchTime(),
                 tagIds,
                 campaign.getAllTrustworthy(),
+                photoIds,  // ✅ NOVO
+                videoIds,  // ✅ NOVO
                 campaign.getCriadoEm(),
                 campaign.getAtualizadoEm()
         );

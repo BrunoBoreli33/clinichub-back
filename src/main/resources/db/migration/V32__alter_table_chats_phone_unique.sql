@@ -1,0 +1,2 @@
+ALTER TABLE chats DROP CONSTRAINT IF EXISTS unique_phone;
+ALTER TABLE chats ADD CONSTRAINT unique_phone UNIQUE (phone);

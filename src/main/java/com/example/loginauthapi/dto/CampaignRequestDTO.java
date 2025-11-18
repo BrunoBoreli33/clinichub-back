@@ -26,5 +26,9 @@ public record CampaignRequestDTO(
 
         List<String> tagIds,
 
-        Boolean allTrustworthy
+        Boolean allTrustworthy,
+
+        List<String> photoIds,  // ✅ NOVO: IDs das fotos a serem enviadas
+
+        List<String> videoIds   // ✅ NOVO: IDs dos vídeos a serem enviados
 ) {}
