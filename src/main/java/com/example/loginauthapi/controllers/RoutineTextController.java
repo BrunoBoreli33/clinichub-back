@@ -14,6 +14,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -35,11 +36,24 @@ public class RoutineTextController {
     }
 
     private RoutineTextDTO toDTO(RoutineText routine) {
+        // ✅ NOVO: Converter photoIds e videoIds de String para List
+        List<String> photoIds = null;
+        if (routine.getPhotoIds() != null && !routine.getPhotoIds().isEmpty()) {
+            photoIds = Arrays.asList(routine.getPhotoIds().split(","));
+        }
+
+        List<String> videoIds = null;
+        if (routine.getVideoIds() != null && !routine.getVideoIds().isEmpty()) {
+            videoIds = Arrays.asList(routine.getVideoIds().split(","));
+        }
+
         return new RoutineTextDTO(
                 routine.getId(),
                 routine.getSequenceNumber(),
                 routine.getTextContent(),
-                routine.getHoursDelay()
+                routine.getHoursDelay(),
+                photoIds,  // ✅ NOVO
+                videoIds   // ✅ NOVO
         );
     }
 
@@ -106,6 +120,16 @@ public class RoutineTextController {
             routine.setTextContent(request.getTextContent());
             routine.setHoursDelay(request.getHoursDelay());
 
+            // ✅ NOVO: Salvar photoIds como string separada por vírgulas
+            if (request.getPhotoIds() != null && !request.getPhotoIds().isEmpty()) {
+                routine.setPhotoIds(String.join(",", request.getPhotoIds()));
+            }
+
+            // ✅ NOVO: Salvar videoIds como string separada por vírgulas
+            if (request.getVideoIds() != null && !request.getVideoIds().isEmpty()) {
+                routine.setVideoIds(String.join(",", request.getVideoIds()));
+            }
+
             RoutineText saved = routineTextRepository.save(routine);
 
             log.info("✅ [USER: {}] Rotina #{} criada com sucesso (ID: {})",
@@ -154,6 +178,20 @@ public class RoutineTextController {
 
             routine.setTextContent(request.getTextContent());
             routine.setHoursDelay(request.getHoursDelay());
+
+            // ✅ NOVO: Atualizar photoIds
+            if (request.getPhotoIds() != null && !request.getPhotoIds().isEmpty()) {
+                routine.setPhotoIds(String.join(",", request.getPhotoIds()));
+            } else {
+                routine.setPhotoIds(null);
+            }
+
+            // ✅ NOVO: Atualizar videoIds
+            if (request.getVideoIds() != null && !request.getVideoIds().isEmpty()) {
+                routine.setVideoIds(String.join(",", request.getVideoIds()));
+            } else {
+                routine.setVideoIds(null);
+            }
 
             RoutineText updated = routineTextRepository.save(routine);
 

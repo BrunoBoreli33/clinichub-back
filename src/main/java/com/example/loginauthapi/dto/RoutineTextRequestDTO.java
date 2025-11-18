@@ -9,6 +9,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.List;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -27,4 +29,7 @@ public class RoutineTextRequestDTO {
     @Min(value = 0, message = "Horas devem ser entre 0 e 48")
     @Max(value = 48, message = "Horas devem ser entre 0 e 48")
     private Integer hoursDelay;
+
+    private List<String> photoIds;  // ✅ NOVO: IDs das fotos (opcional)
+    private List<String> videoIds;  // ✅ NOVO: IDs dos vídeos (opcional)
 }

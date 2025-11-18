@@ -1,10 +1,13 @@
 package com.example.loginauthapi.services;
 
+import com.example.loginauthapi.dto.PhotoDTO;
+import com.example.loginauthapi.dto.VideoDTO;
 import com.example.loginauthapi.entities.*;
 import com.example.loginauthapi.repositories.*;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +34,12 @@ public class RoutineAutomationService {
 
     // ✅ NOVO: Serviço para enviar notificações SSE
     private final NotificationService notificationService;
+
+    // ✅ NOVO: Serviços e repositórios para enviar fotos e vídeos
+    private final PhotoService photoService;
+    private final VideoService videoService;
+    private final PhotoRepository photoRepository;
+    private final VideoRepository videoRepository;
 
     // Nomes das colunas/categorias onde os chats podem estar
     private static final String REPESCAGEM_COLUMN = "followup"; // Coluna de acompanhamento automático
@@ -273,23 +282,13 @@ public class RoutineAutomationService {
 // 3. Se chegou aqui → ENVIAR
             state.setScheduledSendTime(null); // limpa a fila
 
-
-            // Envia a mensagem via Z-API (WhatsApp)
-            Map<String, Object> result = zapiMessageService.sendTextMessage(
+            // ✅ NOVO: Enviar texto, fotos e vídeos
+            sendRoutineWithMedia(
+                    chat,
                     webInstance,
-                    chat.getPhone(),
-                    routineToSend.getTextContent()
+                    routineToSend,
+                    "Rotina #" + routineToSend.getSequenceNumber()
             );
-
-            // Verifica se foi enviada com sucesso
-            boolean sent = result != null && Boolean.TRUE.equals(result.get("success"));
-
-            if (sent) {
-                log.info("✅ [CHAT: {}] Chat movido para Repescagem → Rotina #{} enviada",
-                        chat.getId(), routineToSend.getSequenceNumber());
-            } else {
-                log.error("❌ [CHAT: {}] Falha ao enviar rotina #{}", chat.getId(), routineToSend.getSequenceNumber());
-            }
 
         } catch (Exception e) {
             log.error("❌ [CHAT: {}] Erro ao mover para repescagem", chat.getId(), e);
@@ -458,28 +457,17 @@ public class RoutineAutomationService {
 // 3. Se chegou aqui → ENVIAR
             state.setScheduledSendTime(null); // limpa a fila
 
-            // Envia a mensagem via Z-API (WhatsApp)
-            Map<String, Object> result = zapiMessageService.sendTextMessage(
+            // ✅ NOVO: Enviar texto, fotos e vídeos
+            sendRoutineWithMedia(
+                    chat,
                     webInstance,
-                    chat.getPhone(),
-                    routine.getTextContent()
+                    routine,
+                    "Rotina #" + routine.getSequenceNumber()
             );
 
-            // ATUALIZAÇÃO DO TEMPO DE ENVIO APÓS A TENTATIVA DO Z-API
-            // lastRoutineSent já foi atualizado em checkAndSendNextRoutineMessage
+            // ATUALIZAÇÃO DO TEMPO DE ENVIO APÓS O ENVIO
             state.setLastAutomatedMessageSent(LocalDateTime.now());
             chatRoutineStateRepository.save(state);
-            // FIM DA CORREÇÃO
-
-            // Verifica se foi enviada com sucesso
-            boolean sent = result != null && Boolean.TRUE.equals(result.get("success"));
-
-            if (sent) {
-                log.info("✅ [CHAT: {}] Rotina #{} enviada", chat.getId(), routine.getSequenceNumber());
-            } else {
-                // O log de erro acontece. O contador e o tempo de envio foram atualizados.
-                log.error("❌ [CHAT: {}] Falha ao enviar rotina #{}. Contador e tempo atualizados.", chat.getId(), routine.getSequenceNumber());
-            }
 
         } catch (Exception e) {
             log.error("❌ [CHAT: {}] Erro ao enviar rotina #{}", chat.getId(), routine.getSequenceNumber(), e);
@@ -637,5 +625,149 @@ public class RoutineAutomationService {
         return next.withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
     }
 
+    /**
+     * ✅ NOVO: Obter fotos da galeria para a rotina
+     */
+    private List<Photo> getRoutinePhotos(RoutineText routine) {
+        if (routine.getPhotoIds() == null || routine.getPhotoIds().isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<String> photoIds = Arrays.asList(routine.getPhotoIds().split(","));
+        return photoRepository.findAllById(photoIds);
+    }
+
+    /**
+     * ✅ NOVO: Obter vídeos da galeria para a rotina
+     */
+    private List<Video> getRoutineVideos(RoutineText routine) {
+        if (routine.getVideoIds() == null || routine.getVideoIds().isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<String> videoIds = Arrays.asList(routine.getVideoIds().split(","));
+        return videoRepository.findAllById(videoIds);
+    }
+
+    /**
+     * ✅ NOVO: Enviar texto, fotos e vídeos de uma rotina
+     * Segue o fluxo: texto → fotos → vídeos
+     */
+    private void sendRoutineWithMedia(
+            Chat chat,
+            WebInstance webInstance,
+            RoutineText routine,
+            String messagePrefix
+    ) throws InterruptedException {
+        // ===== PASSO 1: Enviar mensagem de texto =====
+        Map<String, Object> result = zapiMessageService.sendTextMessage(
+                webInstance,
+                chat.getPhone(),
+                routine.getTextContent()
+        );
+
+        boolean textSent = result != null && Boolean.TRUE.equals(result.get("success"));
+
+        if (textSent) {
+            log.info("✅ [CHAT: {}] {} enviada", chat.getId(), messagePrefix);
+        } else {
+            log.error("❌ [CHAT: {}] Falha ao enviar {}", chat.getId(), messagePrefix);
+        }
+
+        // Delay entre mensagem e fotos
+        Thread.sleep(2000);
+
+        // ===== PASSO 2: Enviar fotos (se houver) =====
+        List<Photo> photos = getRoutinePhotos(routine);
+        if (!photos.isEmpty()) {
+            log.info("📷 [CHAT: {}] Enviando {} foto(s)", chat.getId(), photos.size());
+            for (Photo photo : photos) {
+                try {
+                    PhotoDTO savedPhoto = null;
+                    try {
+                        savedPhoto = photoService.saveOutgoingPhoto(
+                                chat.getId(),
+                                chat.getPhone(),
+                                photo.getImageUrl(),
+                                webInstance.getId(),
+                                null
+                        );
+                    } catch (DataIntegrityViolationException e) {
+                        log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
+                    }
+
+                    Map<String, Object> photoResult = zapiMessageService.sendImage(
+                            webInstance,
+                            chat.getPhone(),
+                            photo.getImageUrl()
+                    );
+
+                    if (photoResult != null && photoResult.containsKey("messageId")) {
+                        String photoMessageId = (String) photoResult.get("messageId");
+                        log.info("✅ Foto enviada - MessageId: {}", photoMessageId);
+
+                        if (savedPhoto != null) {
+                            try {
+                                photoService.updatePhotoIdAfterSend(savedPhoto.getMessageId(), photoMessageId, "SENT");
+                            } catch (DataIntegrityViolationException e) {
+                                log.warn("⚠️ Erro de duplicação ao atualizar photo messageId. Ignorando.");
+                            }
+                        }
+                    }
+
+                    Thread.sleep(2000);
+
+                } catch (Exception e) {
+                    log.error("❌ Erro ao enviar foto: {}", e.getMessage());
+                }
+            }
+        }
+
+        // ===== PASSO 3: Enviar vídeos (se houver) =====
+        List<Video> videos = getRoutineVideos(routine);
+        if (!videos.isEmpty()) {
+            log.info("🎥 [CHAT: {}] Enviando {} vídeo(s)", chat.getId(), videos.size());
+            for (Video video : videos) {
+                try {
+                    VideoDTO savedVideo = null;
+                    try {
+                        savedVideo = videoService.saveOutgoingVideo(
+                                chat.getId(),
+                                chat.getPhone(),
+                                video.getVideoUrl(),
+                                webInstance.getId(),
+                                null
+                        );
+                    } catch (DataIntegrityViolationException e) {
+                        log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
+                    }
+
+                    Map<String, Object> videoResult = zapiMessageService.sendVideo(
+                            webInstance,
+                            chat.getPhone(),
+                            video.getVideoUrl()
+                    );
+
+                    if (videoResult != null && videoResult.containsKey("messageId")) {
+                        String videoMessageId = (String) videoResult.get("messageId");
+                        log.info("✅ Vídeo enviado - MessageId: {}", videoMessageId);
+
+                        if (savedVideo != null) {
+                            try {
+                                videoService.updateVideoIdAfterSend(savedVideo.getMessageId(), videoMessageId, "SENT");
+                            } catch (DataIntegrityViolationException e) {
+                                log.warn("⚠️ Erro de duplicação ao atualizar video messageId. Ignorando.");
+                            }
+                        }
+                    }
+
+                    Thread.sleep(2000);
+
+                } catch (Exception e) {
+                    log.error("❌ Erro ao enviar vídeo: {}", e.getMessage());
+                }
+            }
+        }
+    }
 
 }

@@ -31,6 +31,14 @@ public class RoutineText {
     @Column(nullable = false)
     private Integer hoursDelay; // 0 a 48
 
+    // ✅ NOVO: Armazena os IDs das fotos da galeria a serem enviadas (separados por vírgula)
+    @Column(name = "photo_ids", columnDefinition = "TEXT")
+    private String photoIds;
+
+    // ✅ NOVO: Armazena os IDs dos vídeos da galeria a serem enviados (separados por vírgula)
+    @Column(name = "video_ids", columnDefinition = "TEXT")
+    private String videoIds;
+
     @Column(nullable = false, updatable = false)
     private java.time.LocalDateTime createdAt = java.time.LocalDateTime.now();
 
