@@ -5,6 +5,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.List;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -14,4 +16,6 @@ public class RoutineTextDTO {
     private Integer sequenceNumber;
     private String textContent;
     private Integer hoursDelay;
+    private List<String> photoIds;  // ✅ NOVO: IDs das fotos
+    private List<String> videoIds;  // ✅ NOVO: IDs dos vídeos
 }
