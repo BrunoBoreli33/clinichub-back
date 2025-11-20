@@ -105,6 +105,16 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
     List<Chat> findByUserIdAndColumn(@Param("userId") String userId, @Param("column") String column);
 
     /**
+     * Buscar chat por id, coluna e nao é grupo
+     * Usado para filtrar chats para repescagem
+     */
+    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column = :column AND c.isGroup = false")
+    List<Chat> findByUserIdAndColumnAndNotGroup(
+            @Param("userId") String userId,
+            @Param("column") String column
+    );
+
+    /**
      * Buscar chat por phone e webInstanceId
      * Usado para uploads diretos e criação automática de chats
      */
