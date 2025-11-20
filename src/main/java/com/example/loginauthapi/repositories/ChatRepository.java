@@ -114,6 +114,7 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
             @Param("column") String column
     );
 
+
     /**
      * Buscar chat por phone e webInstanceId
      * Usado para uploads diretos e criação automática de chats
