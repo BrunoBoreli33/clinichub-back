@@ -160,7 +160,7 @@ public class RoutineAutomationService {
         // Calcula quanto tempo passou desde a última mensagem do usuário
         Message lastUserMessage = lastUserMessageOpt.get();
         LocalDateTime lastMessageTime = lastUserMessage.getTimestamp();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
         long hoursSinceLastMessage = Duration.between(lastMessageTime, now).toHours();
 
         // Se passou tempo suficiente (definido em hours_delay em HORAS)
@@ -257,11 +257,11 @@ public class RoutineAutomationService {
             WebInstance webInstance = webInstanceOpt.get();
 
             // ATUALIZAÇÃO DO TEMPO DE ENVIO ANTES DA TENTATIVA DO Z-API
-            state.setLastAutomatedMessageSent(LocalDateTime.now());
+            state.setLastAutomatedMessageSent(LocalDateTime.now(ZoneId.of("America/Sao_Paulo")));
             chatRoutineStateRepository.save(state);
 
 
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
 // 1. Caso exista um horário já programado:
             if (state.getScheduledSendTime() != null) {
@@ -333,7 +333,7 @@ public class RoutineAutomationService {
 
                 if (lastRoutineOpt.isPresent()) {
                     RoutineText lastRoutine = lastRoutineOpt.get();
-                    LocalDateTime now = LocalDateTime.now();
+                    LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
                     // Calcula quanto tempo passou desde a última mensagem automática
                     long hoursSinceLastAutomated = Duration.between(
@@ -352,7 +352,7 @@ public class RoutineAutomationService {
 
         // Se já enviou alguma mensagem automática antes
         if (state.getLastAutomatedMessageSent() != null) {
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
             // Calcula quanto tempo passou desde a última mensagem automática
             long hoursSinceLastAutomated = Duration.between(
@@ -436,7 +436,7 @@ public class RoutineAutomationService {
 
 
 
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
 // 1. Caso exista um horário já programado:
             if (state.getScheduledSendTime() != null) {
@@ -466,7 +466,7 @@ public class RoutineAutomationService {
             );
 
             // ATUALIZAÇÃO DO TEMPO DE ENVIO APÓS O ENVIO
-            state.setLastAutomatedMessageSent(LocalDateTime.now());
+            state.setLastAutomatedMessageSent(LocalDateTime.now(ZoneId.of("America/Sao_Paulo")));
             chatRoutineStateRepository.save(state);
 
         } catch (Exception e) {
@@ -591,8 +591,7 @@ public class RoutineAutomationService {
 
     private boolean isBusinessHours(LocalDateTime dateTime) {
         // Considerar que o servidor pode estar em UTC. Ajustamos para BRT.
-        ZonedDateTime brtTime = dateTime.atZone(ZoneId.of("UTC"))
-                .withZoneSameInstant(ZoneId.of("America/Sao_Paulo"));
+        ZonedDateTime brtTime = dateTime.atZone(ZoneId.of("America/Sao_Paulo"));
 
         DayOfWeek dow = brtTime.getDayOfWeek();
         int hour = brtTime.getHour();
@@ -604,8 +603,7 @@ public class RoutineAutomationService {
     }
 
     private LocalDateTime nextBusinessWindow(LocalDateTime now) {
-        ZonedDateTime brt = now.atZone(ZoneId.of("UTC"))
-                .withZoneSameInstant(ZoneId.of("America/Sao_Paulo"));
+        ZonedDateTime brt = now.atZone(ZoneId.of("America/Sao_Paulo"));
 
         // Ajusta para 08:00 do próprio dia, caso esteja antes
         if (isBusinessHours(now)) {
