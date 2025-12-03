@@ -29,7 +29,7 @@ public class RoutineText {
     private String textContent;
 
     @Column(nullable = false)
-    private Integer hoursDelay; // 0 a 48
+    private Integer hoursDelay; // 0 a 100
 
     // ✅ NOVO: Armazena os IDs das fotos da galeria a serem enviadas (separados por vírgula)
     @Column(name = "photo_ids", columnDefinition = "TEXT")

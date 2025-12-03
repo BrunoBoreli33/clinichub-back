@@ -26,8 +26,8 @@ public class RoutineTextRequestDTO {
     private String textContent;
 
     @NotNull(message = "Horas de delay é obrigatório")
-    @Min(value = 0, message = "Horas devem ser entre 0 e 48")
-    @Max(value = 48, message = "Horas devem ser entre 0 e 48")
+    @Min(value = 0, message = "Horas devem ser entre 0 e 100")
+    @Max(value = 100, message = "Horas devem ser entre 0 e 100")
     private Integer hoursDelay;
 
     private List<String> photoIds;  // ✅ NOVO: IDs das fotos (opcional)
