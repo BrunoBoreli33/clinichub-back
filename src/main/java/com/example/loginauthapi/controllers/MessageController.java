@@ -19,6 +19,7 @@ import com.example.loginauthapi.services.PhotoService;
 import com.example.loginauthapi.services.ReplyService;
 import com.example.loginauthapi.services.VideoService;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
+import com.example.loginauthapi.services.AudioConversionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -46,6 +47,7 @@ public class MessageController {
     private final WebInstanceRepository webInstanceRepository;
     private final ChatRepository chatRepository;
     private final ReplyService replyService;
+    private final AudioConversionService audioConversionService;
 
     private User getAuthenticatedUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -415,14 +417,29 @@ public class MessageController {
                 ));
             }
 
+            // ✅ NOVO: Converter áudio para OGG/Opus (compatível com iOS)
+            String convertedAudio;
+            try {
+                log.info("🔄 Convertendo áudio para formato OGG/Opus (compatível com iOS)");
+                convertedAudio = audioConversionService.convertToOggOpus(audioBase64);
+                log.info("✅ Áudio convertido com sucesso para OGG/Opus");
+            } catch (Exception e) {
+                log.error("❌ Erro na conversão de áudio: {}", e.getMessage(), e);
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                        "success", false,
+                        "message", "Erro ao converter áudio: " + e.getMessage()
+                ));
+            }
+
+
             // ✅ MODIFICADO: Usar audioService ao invés de messageService
             log.info("💾 Salvando áudio no banco antes de enviar");
             AudioDTO savedAudio = audioService.saveOutgoingAudio(chatId, phone, duration, "");
 
             // ✅ PASSO 2: Enviar via Z-API
-            log.info("📨 Enviando áudio via Z-API - Phone: {}", phone);
+            log.info("📨 Enviando áudio OGG/Opus via Z-API - Phone: {}", phone);
             Map<String, Object> zapiResult = zapiMessageService.sendAudio(
-                    instance, phone, audioBase64, waveform
+                    instance, phone, convertedAudio, waveform
             );
 
             // ✅ PASSO 3: Atualizar com messageId real e audioUrl
