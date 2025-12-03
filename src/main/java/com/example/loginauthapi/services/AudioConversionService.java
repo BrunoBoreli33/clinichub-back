@@ -79,19 +79,21 @@ public class AudioConversionService {
             log.info("🔄 Iniciando conversão de áudio para OGG/Opus");
             log.info("   Input: {} ({} bytes)", inputPath.getFileName(), audioBytes.length);
 
-            // Comando FFmpeg OTIMIZADO para converter rapidamente
-            // Removido flags desnecessárias, adicionado -threads 0 para usar todos os cores
+            // Comando FFmpeg para MÁXIMA QUALIDADE de áudio
+            // Configurações premium para melhor experiência no WhatsApp
             ProcessBuilder processBuilder = new ProcessBuilder(
                     "ffmpeg",
                     "-i", inputPath.toString(),           // Arquivo de entrada
                     "-c:a", "libopus",                    // Codec Opus
-                    "-b:a", "32k",                        // Bitrate 32kbps
+                    "-b:a", "128k",                       // ✅ Bitrate 128kbps (MÁXIMA QUALIDADE)
                     "-ar", "48000",                       // Sample rate 48kHz
                     "-ac", "1",                           // Mono (1 canal)
                     "-threads", "0",                      // Usar todos os cores disponíveis
-                    "-compression_level", "10",           // Máxima compressão (mais rápido)
-                    "-frame_duration", "60",              // Frame duration 60ms (padrão WhatsApp)
+                    "-compression_level", "0",            // ✅ Sem compressão extra (mais rápido e melhor qualidade)
+                    "-frame_duration", "20",              // ✅ Frame 20ms (melhor qualidade)
                     "-application", "voip",               // Otimizado para voz
+                    "-packet_loss", "0",                  // ✅ Sem perda de pacotes
+                    "-vbr", "on",                         // ✅ Variable bitrate (adaptativo)
                     "-y",                                 // Sobrescrever arquivo de saída
                     outputPath.toString()                 // Arquivo de saída
             );
@@ -135,7 +137,7 @@ public class AudioConversionService {
 
             log.info("✅ Áudio convertido com sucesso em {}ms!", duration);
             log.info("   Output: {} ({} bytes)", outputPath.getFileName(), convertedBytes.length);
-            log.info("   Formato: OGG/Opus 48kHz Mono 32kbps");
+            log.info("   Formato: OGG/Opus 48kHz Mono 128kbps (MÁXIMA QUALIDADE)");
             log.info("   Redução: {:.1f}%", (1 - (double)convertedBytes.length / audioBytes.length) * 100);
 
             // Adicionar prefixo data URL para compatibilidade
