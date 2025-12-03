@@ -45,8 +45,8 @@ public class RoutineAutomationService {
     private static final String REPESCAGEM_COLUMN = "followup"; // Coluna de acompanhamento automático
     private static final String LEAD_FRIO_COLUMN = "cold_lead"; // Coluna de leads frios (sem resposta)
 
-    // Método executado automaticamente a cada 30 segundos
-    @Scheduled(fixedRate = 30000)
+    // Método executado automaticamente a cada minuto
+    @Scheduled(cron = "0 * 8-20 * * MON-FRI", zone = "America/Sao_Paulo")
     public void processRoutineAutomation() {
         log.info("🤖 Iniciando processamento de rotinas automáticas");
 
