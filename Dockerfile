@@ -10,6 +10,10 @@ RUN mvn -B -DskipTests package -Dspring.profiles.active=ci
 
 # Etapa 2 - Runtime
 FROM eclipse-temurin:17-jre
+
+# Instala o ffmpeg no container
+RUN apt-get update && apt-get install -y ffmpeg && apt-get clean
+
 WORKDIR /app
 
 # Copia o JAR gerado
