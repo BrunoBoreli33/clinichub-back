@@ -36,21 +36,23 @@ public class ZapiMessageService {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
 
-            Map<String, String> body = Map.of(
+            Map<String, Object> body = Map.of(
                     "phone", phone,
-                    "message", message
+                    "message", message,
+                    "delayTyping" , 15,
+                    "delayMessage" , 15
             );
 
-            HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 
-            ResponseEntity<Map> response = restTemplate.exchange(
+            var response = restTemplate.exchange(
                     url,
                     HttpMethod.POST,
                     entity,
                     Map.class
             );
 
-            Map<String, Object> result = response.getBody();
+            var result = response.getBody();
             log.info("✅ Mensagem enviada com sucesso - MessageId: {}",
                     result != null ? result.get("messageId") : "N/A");
 
@@ -80,12 +82,15 @@ public class ZapiMessageService {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
 
-            Map<String, String> body = new HashMap<>();
+            Map<String, Object> body = new HashMap<>();
             body.put("phone", phone);
             body.put("message", message);
+            body.put("delayMessage", 15);
+            body.put("delayTyping", 15);
             body.put("messageId", messageId); // ID da mensagem que está sendo respondida
 
-            HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 
             ResponseEntity<Map> response = restTemplate.exchange(
                     url,
@@ -127,6 +132,8 @@ public class ZapiMessageService {
             body.put("phone", phone);
             body.put("audio", audioBase64);
             body.put("viewOnce", false);
+            body.put("delayMessage", 15);
+            body.put("delayTyping", 15);
             body.put("waveform", waveform != null ? waveform : true);
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
@@ -170,6 +177,8 @@ public class ZapiMessageService {
             Map<String, Object> body = new HashMap<>();
             body.put("phone", phone);
             body.put("image", image);
+            body.put("delayMessage", 15);
+            body.put("delayTyping", 15);
             body.put("viewOnce", false);
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
@@ -213,6 +222,8 @@ public class ZapiMessageService {
             Map<String, Object> body = new HashMap<>();
             body.put("phone", phone);
             body.put("video", video);
+            body.put("delayMessage", 15);
+            body.put("delayTyping", 15);
             body.put("viewOnce", false);
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
@@ -301,6 +312,8 @@ public class ZapiMessageService {
             Map<String, Object> body = new HashMap<>();
             body.put("phone", phone);
             body.put("document", document);
+            body.put("delayMessage", 15);
+            body.put("delayTyping", 15);
 
             if (fileName != null && !fileName.isEmpty()) {
                 body.put("fileName", fileName);
