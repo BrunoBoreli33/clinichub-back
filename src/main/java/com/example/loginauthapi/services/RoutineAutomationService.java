@@ -8,6 +8,7 @@ import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -97,6 +98,13 @@ public class RoutineAutomationService {
         // Verifica cada chat em repescagem para enviar a próxima mensagem automática
         for (Chat chat : repescagemChats) {
             checkAndSendNextRoutineMessage(chat, user, routines);
+            try {
+                Thread.sleep(300000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("❌ Thread de repescagem interrompida.", e);
+            }
+
         }
 
         // ✅ PASSO 2: Depois busca chats que PRECISAM ENTRAR em repescagem
@@ -111,10 +119,17 @@ public class RoutineAutomationService {
         // Verifica cada chat para ver se é hora de mover para repescagem
         for (Chat chat : monitoredChats) {
             checkAndMoveToRepescagem(chat, user, firstRoutine, routines);
+            try {
+                Thread.sleep(300000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("❌ Thread de repescagem interrompida.", e);
+            }
         }
     }
 
     // Verifica se um chat deve ser movido para repescagem e envia a primeira mensagem
+    @Async
     private void checkAndMoveToRepescagem(Chat chat, User user, RoutineText firstRoutine, List<RoutineText> routines) {
 
         // ✅ NOVO: Verifica se a repescagem já foi concluída anteriormente
@@ -296,6 +311,7 @@ public class RoutineAutomationService {
     }
 
     // Verifica e envia a próxima mensagem de rotina para um chat já em repescagem
+    @Async
     private void checkAndSendNextRoutineMessage(Chat chat, User user, List<RoutineText> routines) {
         // Busca o estado de rotina deste chat
         Optional<ChatRoutineState> stateOpt = chatRoutineStateRepository.findByChatId(chat.getId());
@@ -657,11 +673,18 @@ public class RoutineAutomationService {
             RoutineText routine,
             String messagePrefix
     ) throws InterruptedException {
+        String greeting = randomGreeting();
+        String fallbackGreeting = randomFallbackGreeting();
+
+        String chatName = chat.getName();
+        String receiverName = chatName == null || chatName.isBlank() ? fallbackGreeting : greeting + chat.getName();
+
+        String messageToSend = receiverName + ", " + routine.getTextContent();
         // ===== PASSO 1: Enviar mensagem de texto =====
         Map<String, Object> result = zapiMessageService.sendTextMessage(
                 webInstance,
                 chat.getPhone(),
-                routine.getTextContent()
+                messageToSend
         );
 
         boolean textSent = result != null && Boolean.TRUE.equals(result.get("success"));
@@ -673,7 +696,7 @@ public class RoutineAutomationService {
         }
 
         // Delay entre mensagem e fotos
-        Thread.sleep(2000);
+        Thread.sleep(20000);
 
         // ===== PASSO 2: Enviar fotos (se houver) =====
         List<Photo> photos = getRoutinePhotos(routine);
@@ -759,13 +782,40 @@ public class RoutineAutomationService {
                         }
                     }
 
-                    Thread.sleep(2000);
+                    Thread.sleep(20000);
 
                 } catch (Exception e) {
                     log.error("❌ Erro ao enviar vídeo: {}", e.getMessage());
                 }
             }
         }
+    }
+
+
+    private static final List<String> GREETINGS = List.of(
+            "Olá ",
+            "Oi ",
+            "Oii ",
+            "Oiii ",
+            "Oie ",
+            "Oiee ",
+            "Oieeê "
+    );
+
+    private static final List<String> FALLBACK_GREETINGS = List.of(
+            "Oii querid@",
+            "Olá! Espero que esteja bem",
+            "Oiê! Como vai?"
+    );
+
+    private static final Random RANDOM = new Random();
+
+    private static String randomGreeting() {
+        return GREETINGS.get(RANDOM.nextInt(GREETINGS.size()));
+    }
+
+    private static String randomFallbackGreeting() {
+        return FALLBACK_GREETINGS.get(RANDOM.nextInt(FALLBACK_GREETINGS.size()));
     }
 
 }
