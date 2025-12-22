@@ -83,11 +83,11 @@ public class RoutineAutomationService {
     private static final int MAX_MESSAGES_PER_HOUR = 100;
 
     // Delays entre envios (em segundos)
-    private static final int MIN_DELAY_BETWEEN_MESSAGES = 30; // 30s mínimo
-    private static final int MAX_DELAY_BETWEEN_MESSAGES = 90; // 90s máximo
-    private static final int DELAY_BETWEEN_PHOTOS = 15; // 15s entre fotos
-    private static final int DELAY_BETWEEN_VIDEOS = 30; // 30s entre vídeos
-    private static final int DELAY_AFTER_TEXT = 25; // 25s após texto antes de mídia
+    private static final int MIN_DELAY_BETWEEN_MESSAGES = 122; // 30s mínimo
+    private static final int MAX_DELAY_BETWEEN_MESSAGES = 357; // 90s máximo
+    private static final int DELAY_BETWEEN_PHOTOS = 18; // 15s entre fotos
+    private static final int DELAY_BETWEEN_VIDEOS = 33; // 30s entre vídeos
+    private static final int DELAY_AFTER_TEXT = 42; // 25s após texto antes de mídia
 
     // Retry configuration
     private static final int MAX_RETRY_ATTEMPTS = 3;
@@ -579,7 +579,7 @@ public class RoutineAutomationService {
                     messageToSend
             );
 
-            boolean textSent = result != null && Boolean.TRUE.equals(result.get("success"));
+            boolean textSent = result != null && Boolean.TRUE.equals(result.get("messageId"));
 
             if (textSent) {
                 log.info("✅ [CHAT: {}] {} enviada", chat.getId(), messagePrefix);
