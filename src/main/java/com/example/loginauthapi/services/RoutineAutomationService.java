@@ -15,290 +15,353 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
 import java.util.*;
+import java.util.concurrent.*;
 
-// Serviço responsável por automatizar o envio de mensagens de rotina para clientes
+/**
+ * Serviço responsável por automatizar o envio de mensagens de rotina
+ * COM PROTEÇÃO CONTRA BAN do WhatsApp/Meta
+ *
+ * Implementa:
+ * - Rate limiting por instância (max 10 msg/min, 100 msg/hour)
+ * - Delays progressivos entre mensagens
+ * - Processamento assíncrono não-bloqueante
+ * - Retry com backoff exponencial
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class RoutineAutomationService {
 
-    // Repositórios para acessar dados do banco
     private final ChatRepository chatRepository;
     private final MessageRepository messageRepository;
     private final RoutineTextRepository routineTextRepository;
     private final ChatRoutineStateRepository chatRoutineStateRepository;
     private final UserRepository userRepository;
     private final WebInstanceRepository webInstanceRepository;
-
-    // Serviço para enviar mensagens via WhatsApp (Z-API)
     private final ZapiMessageService zapiMessageService;
-
-    // ✅ NOVO: Serviço para enviar notificações SSE
     private final NotificationService notificationService;
-
-    // ✅ NOVO: Serviços e repositórios para enviar fotos e vídeos
     private final PhotoService photoService;
     private final VideoService videoService;
     private final PhotoRepository photoRepository;
     private final VideoRepository videoRepository;
 
-    // Nomes das colunas/categorias onde os chats podem estar
-    private static final String REPESCAGEM_COLUMN = "followup"; // Coluna de acompanhamento automático
-    private static final String LEAD_FRIO_COLUMN = "cold_lead"; // Coluna de leads frios (sem resposta)
+    private static final String REPESCAGEM_COLUMN = "followup";
+    private static final String LEAD_FRIO_COLUMN = "cold_lead";
 
-    // Método executado automaticamente a cada minuto
+    // ========== RATE LIMITING CONFIGURATION ==========
+
+    /**
+     * Rate limiters por instância do WhatsApp
+     * Key: webInstanceId
+     * Value: RateLimiter com controle de mensagens/minuto
+     */
+    private final ConcurrentHashMap<String, RateLimiter> rateLimiters = new ConcurrentHashMap<>();
+
+    /**
+     * Contador de mensagens por hora para cada instância
+     * Evita ban por volume excessivo
+     */
+    private final ConcurrentHashMap<String, HourlyMessageCounter> hourlyCounters = new ConcurrentHashMap<>();
+
+    /**
+     * Executor para processamento assíncrono COM controle de pool
+     */
+    private final ExecutorService messageExecutor = Executors.newFixedThreadPool(
+            5, // Máximo 5 threads simultâneas
+            r -> {
+                Thread t = new Thread(r);
+                t.setName("routine-msg-" + System.currentTimeMillis());
+                t.setDaemon(true);
+                return t;
+            }
+    );
+
+    // ========== CONFIGURAÇÕES DE SEGURANÇA ==========
+
+    // Limites por instância (evita ban)
+    private static final int MAX_MESSAGES_PER_MINUTE = 10;
+    private static final int MAX_MESSAGES_PER_HOUR = 100;
+
+    // Delays entre envios (em segundos)
+    private static final int MIN_DELAY_BETWEEN_MESSAGES = 30; // 30s mínimo
+    private static final int MAX_DELAY_BETWEEN_MESSAGES = 90; // 90s máximo
+    private static final int DELAY_BETWEEN_PHOTOS = 15; // 15s entre fotos
+    private static final int DELAY_BETWEEN_VIDEOS = 30; // 30s entre vídeos
+    private static final int DELAY_AFTER_TEXT = 25; // 25s após texto antes de mídia
+
+    // Retry configuration
+    private static final int MAX_RETRY_ATTEMPTS = 3;
+    private static final int INITIAL_RETRY_DELAY_MS = 5000; // 5s
+
+    // ========== CRON JOB - Executa a cada minuto em horário comercial ==========
+
     @Scheduled(cron = "0 * 8-20 * * MON-FRI", zone = "America/Sao_Paulo")
     public void processRoutineAutomation() {
         log.info("🤖 Iniciando processamento de rotinas automáticas");
 
         try {
-            // Busca todos os usuários cadastrados no sistema
             List<User> users = userRepository.findAll();
 
-            // Para cada usuário, processa suas rotinas de mensagens
             for (User user : users) {
-                processUserRoutines(user);
+                // Processa cada usuário de forma assíncrona
+                CompletableFuture.runAsync(
+                        () -> processUserRoutines(user),
+                        messageExecutor
+                ).exceptionally(ex -> {
+                    log.error("❌ Erro ao processar usuário {}", user.getId(), ex);
+                    return null;
+                });
             }
 
-            log.info("✅ Processamento de rotinas automáticas concluído");
+            log.info("✅ Processamento de rotinas iniciado para {} usuários", users.size());
         } catch (Exception e) {
-            // Registra qualquer erro que ocorra durante o processamento
-            log.error("❌ Erro ao processar rotinas automáticas", e);
+            log.error("❌ Erro crítico ao processar rotinas automáticas", e);
         }
     }
 
-    // Processa as rotinas de um usuário específico
-    private void processUserRoutines(User user) {
-        // Busca todas as rotinas configuradas pelo usuário, ordenadas por sequência
+    // ========== PROCESSAMENTO POR USUÁRIO ==========
+
+    void processUserRoutines(User user) {
         List<RoutineText> routines = routineTextRepository.findByUserIdOrderBySequenceNumberAsc(user.getId());
 
-        // Se não há rotinas configuradas, não faz nada
         if (routines.isEmpty()) {
             return;
         }
 
-        // Busca a primeira rotina (sequência 1) - ela define quando iniciar a repescagem
         RoutineText firstRoutine = routines.stream()
                 .filter(r -> r.getSequenceNumber() == 1)
                 .findFirst()
                 .orElse(null);
 
-        // Se não existe rotina de sequência 1, não pode processar
         if (firstRoutine == null) {
             log.warn("⚠️ [USER: {}] Primeira rotina (sequence=1) não configurada", user.getId());
             return;
         }
 
-        // ✅ PASSO 1: Primeiro processa chats que JÁ ESTÃO em repescagem
-        // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
-        List<Chat> repescagemChats = chatRepository.findByUserIdAndColumnAndNotGroup(user.getId(), REPESCAGEM_COLUMN).stream()
+        // PASSO 1: Processar chats já em repescagem
+        List<Chat> repescagemChats = chatRepository
+                .findByUserIdAndColumnAndNotGroup(user.getId(), REPESCAGEM_COLUMN)
+                .stream()
                 .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
 
-        // Verifica cada chat em repescagem para enviar a próxima mensagem automática
         for (Chat chat : repescagemChats) {
-            checkAndSendNextRoutineMessage(chat, user, routines);
-            try {
-                Thread.sleep(300000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.error("❌ Thread de repescagem interrompida.", e);
-            }
-
+            scheduleMessageWithDelay(
+                    () -> checkAndSendNextRoutineMessage(chat, user, routines),
+                    getRandomDelay()
+            );
         }
 
-        // ✅ PASSO 2: Depois busca chats que PRECISAM ENTRAR em repescagem
-        // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
-        List<Chat> monitoredChats = chatRepository.findByUserIdAndColumnIn(
-                        user.getId(),
-                        Arrays.asList("hot_lead", "inbox")
-                ).stream()
+        // PASSO 2: Processar chats que precisam entrar em repescagem
+        List<Chat> monitoredChats = chatRepository
+                .findByUserIdAndColumnIn(user.getId(), Arrays.asList("hot_lead", "inbox"))
+                .stream()
                 .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
 
-        // Verifica cada chat para ver se é hora de mover para repescagem
         for (Chat chat : monitoredChats) {
-            checkAndMoveToRepescagem(chat, user, firstRoutine, routines);
-            try {
-                Thread.sleep(300000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.error("❌ Thread de repescagem interrompida.", e);
-            }
+            scheduleMessageWithDelay(
+                    () -> checkAndMoveToRepescagem(chat, user, firstRoutine, routines),
+                    getRandomDelay()
+            );
         }
     }
 
-    // Verifica se um chat deve ser movido para repescagem e envia a primeira mensagem
+    // ========== RATE LIMITING HELPERS ==========
+
+    /**
+     * Obtém ou cria um rate limiter para uma instância
+     */
+    private RateLimiter getRateLimiter(String webInstanceId) {
+        return rateLimiters.computeIfAbsent(
+                webInstanceId,
+                id -> new RateLimiter(MAX_MESSAGES_PER_MINUTE)
+        );
+    }
+
+    /**
+     * Obtém ou cria um contador horário para uma instância
+     */
+    private HourlyMessageCounter getHourlyCounter(String webInstanceId) {
+        return hourlyCounters.computeIfAbsent(
+                webInstanceId,
+                id -> new HourlyMessageCounter(MAX_MESSAGES_PER_HOUR)
+        );
+    }
+
+    /**
+     * Verifica se pode enviar mensagem (rate limiting)
+     */
+    private boolean canSendMessage(String webInstanceId) {
+        RateLimiter limiter = getRateLimiter(webInstanceId);
+        HourlyMessageCounter counter = getHourlyCounter(webInstanceId);
+
+        if (!counter.canSend()) {
+            log.warn("⏸️ [INSTANCE: {}] Limite horário atingido ({}/hora)",
+                    webInstanceId, MAX_MESSAGES_PER_HOUR);
+            return false;
+        }
+
+        if (!limiter.tryAcquire()) {
+            log.warn("⏸️ [INSTANCE: {}] Limite por minuto atingido ({}/min)",
+                    webInstanceId, MAX_MESSAGES_PER_MINUTE);
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Registra envio de mensagem nos contadores
+     */
+    private void recordMessageSent(String webInstanceId) {
+        getHourlyCounter(webInstanceId).recordMessage();
+    }
+
+    /**
+     * Calcula delay aleatório entre mensagens (evita padrões detectáveis)
+     */
+    private int getRandomDelay() {
+        Random random = new Random();
+        return MIN_DELAY_BETWEEN_MESSAGES +
+                random.nextInt(MAX_DELAY_BETWEEN_MESSAGES - MIN_DELAY_BETWEEN_MESSAGES + 1);
+    }
+
+    /**
+     * Agenda execução com delay
+     */
+    private void scheduleMessageWithDelay(Runnable task, int delaySeconds) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                TimeUnit.SECONDS.sleep(delaySeconds);
+                task.run();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("⚠️ Tarefa interrompida");
+            }
+        }, messageExecutor);
+    }
+
+    // ========== LÓGICA PRINCIPAL (MODIFICADA) ==========
+
     @Async
     private void checkAndMoveToRepescagem(Chat chat, User user, RoutineText firstRoutine, List<RoutineText> routines) {
-
-        // ✅ NOVO: Verifica se a repescagem já foi concluída anteriormente
         Optional<ChatRoutineState> stateOpt = chatRoutineStateRepository.findByChatId(chat.getId());
         if (stateOpt.isPresent() && Boolean.TRUE.equals(stateOpt.get().getRepescagemCompleted())) {
-            log.info("✋ [CHAT: {}] Repescagem já foi concluída anteriormente. Não será reprocessado.", chat.getId());
+            log.info("✋ [CHAT: {}] Repescagem já concluída", chat.getId());
             return;
         }
 
-        // *************************************************************************
-        // CORREÇÃO: PRIMEIRA VERIFICAÇÃO DE ATIVIDADE DO CLIENTE (MANTÉM O CHAT FORA SE ATIVO)
-        // Usando a sintaxe CORRETA do seu MessageRepository: findTopByChatIdOrderByTimestampDesc
-        // *************************************************************************
         Optional<Message> lastAnyMessageOpt = messageRepository
-                .findTopByChatIdOrderByTimestampDesc(chat.getId()); // <-- CORREÇÃO DA SINTAXE
+                .findTopByChatIdOrderByTimestampDesc(chat.getId());
 
         if (lastAnyMessageOpt.isEmpty()) {
-            return; // Se não tem nenhuma mensagem, ignora
+            return;
         }
 
         Message lastAnyMessage = lastAnyMessageOpt.get();
-
-        // Se a ÚLTIMA mensagem GERAL foi DO CLIENTE (fromMe=false), o chat está ativo. NÃO move para repescagem.
         if (!lastAnyMessage.getFromMe()) {
-            return;
+            return; // Cliente respondeu
         }
-        // *************************************************************************
-        // FIM DA CORREÇÃO DE ATIVIDADE
-        // *************************************************************************
 
-
-        // A PARTIR DAQUI, SABEMOS QUE A ÚLTIMA MENSAGEM FOI ENVIADA PELO USUÁRIO (fromMe=true)
-
-        // Busca a última mensagem enviada PELO USUÁRIO (fromMe=true) neste chat
         Optional<Message> lastUserMessageOpt = messageRepository
                 .findFirstByChatIdAndFromMeTrueOrderByTimestampDesc(chat.getId());
 
-        // Se não existe mensagem do usuário, não faz nada
         if (lastUserMessageOpt.isEmpty()) {
             return;
         }
 
-        // Calcula quanto tempo passou desde a última mensagem do usuário
         Message lastUserMessage = lastUserMessageOpt.get();
         LocalDateTime lastMessageTime = lastUserMessage.getTimestamp();
         LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
         long hoursSinceLastMessage = Duration.between(lastMessageTime, now).toHours();
 
-        // Se passou tempo suficiente (definido em hours_delay em HORAS)
-        // então move o chat para repescagem e envia a primeira mensagem automática
         if (hoursSinceLastMessage >= firstRoutine.getHoursDelay()) {
-            // Passa a lista completa de rotinas
             moveToRepescagemAndSendFirstMessage(chat, user, routines);
         }
     }
 
-    // Move um chat para a coluna de repescagem e envia a primeira mensagem da rotina
     private void moveToRepescagemAndSendFirstMessage(Chat chat, User user, List<RoutineText> routines) {
         try {
-            // Busca ou cria um registro de estado de rotina para este chat
             ChatRoutineState state = chatRoutineStateRepository.findByChatId(chat.getId())
                     .orElse(new ChatRoutineState());
 
-            // Calcula qual seria a próxima rotina a ser enviada (baseado em lastRoutineSent)
             int nextSequence = state.getLastRoutineSent() + 1;
 
-            // Busca a rotina correspondente à próxima sequência
             Optional<RoutineText> routineToSendOpt = routines.stream()
                     .filter(r -> r.getSequenceNumber() == nextSequence)
                     .findFirst();
 
-            // ✅ TRATAMENTO: Se não existe a próxima rotina configurada, move para Lead Frio
             if (routineToSendOpt.isEmpty()) {
-                log.warn("⚠️ [CHAT: {}] Não há rotina #{} configurada. Movendo para Lead Frio.", chat.getId(), nextSequence);
-
-                // Configura o estado mínimo necessário
+                log.warn("⚠️ [CHAT: {}] Rotina #{} não configurada", chat.getId(), nextSequence);
                 state.setChat(chat);
                 state.setUser(user);
                 state.setInRepescagem(false);
                 chatRoutineStateRepository.save(state);
-
-                // Move direto para Lead Frio
                 moveToLeadFrio(chat, state, user);
                 return;
             }
 
             RoutineText routineToSend = routineToSendOpt.get();
 
-            // ✅ TRATAMENTO: Se o textContent da rotina está vazio/null, move para Lead Frio
             if (routineToSend.getTextContent() == null || routineToSend.getTextContent().trim().isEmpty()) {
-                log.warn("⚠️ [CHAT: {}] Rotina #{} com textContent vazio. Movendo para Lead Frio.", chat.getId(), nextSequence);
-
-                // Configura o estado mínimo necessário
+                log.warn("⚠️ [CHAT: {}] Rotina #{} vazia", chat.getId(), nextSequence);
                 state.setChat(chat);
                 state.setUser(user);
                 state.setInRepescagem(false);
                 chatRoutineStateRepository.save(state);
-
-                // Move direto para Lead Frio
                 moveToLeadFrio(chat, state, user);
                 return;
             }
 
-            // Guarda qual era a coluna anterior do chat
             String previousColumn = chat.getColumn();
-            state.setInRepescagem(true);
-            // Move o chat para a coluna de repescagem
             chat.setColumn(REPESCAGEM_COLUMN);
             chatRepository.save(chat);
 
-            // Configura o estado inicial da rotina
             state.setChat(chat);
             state.setUser(user);
-            state.setPreviousColumn(previousColumn); // Guarda de onde veio
+            state.setPreviousColumn(previousColumn);
+            state.setLastRoutineSent(nextSequence);
+            state.setInRepescagem(true);
 
-            // ATUALIZAÇÃO DO CONTADOR SEM DEPENDER DO Z-API
-            state.setLastRoutineSent(nextSequence); // Define a rotina que será enviada
-            state.setInRepescagem(true); // Marca que está em repescagem
-
-            // Busca e guarda o horário da última mensagem do usuário
             Optional<Message> lastUserMessageOpt = messageRepository
                     .findFirstByChatIdAndFromMeTrueOrderByTimestampDesc(chat.getId());
             lastUserMessageOpt.ifPresent(msg -> state.setLastUserMessageTime(msg.getTimestamp()));
 
-            // Salva o estado no banco de dados, garantindo o incremento de lastRoutineSent
-            // O lastAutomatedMessageSent será atualizado após a tentativa de envio
             chatRoutineStateRepository.save(state);
 
-            // Busca a instância ativa do WhatsApp do usuário para enviar mensagens
             Optional<WebInstance> webInstanceOpt = webInstanceRepository.findByUserId(user.getId()).stream()
                     .filter(wi -> "ACTIVE".equals(wi.getStatus()))
                     .findFirst();
 
-            // Se não tem instância ativa, não pode enviar mensagem
             if (webInstanceOpt.isEmpty()) {
-                log.error("❌ [CHAT: {}] Usuário {} sem instância ativa", chat.getId(), user.getId());
+                log.error("❌ [CHAT: {}] Sem instância ativa", chat.getId());
                 return;
             }
 
             WebInstance webInstance = webInstanceOpt.get();
 
-            // ATUALIZAÇÃO DO TEMPO DE ENVIO ANTES DA TENTATIVA DO Z-API
             state.setLastAutomatedMessageSent(LocalDateTime.now(ZoneId.of("America/Sao_Paulo")));
             chatRoutineStateRepository.save(state);
 
-
             LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
-// 1. Caso exista um horário já programado:
-            if (state.getScheduledSendTime() != null) {
-                if (now.isBefore(state.getScheduledSendTime())) {
-                    return; // ainda não chegou o horário de enviar
-                }
+            if (state.getScheduledSendTime() != null && now.isBefore(state.getScheduledSendTime())) {
+                return;
             }
 
-// 2. Caso não seja horário comercial:
             if (!isBusinessHours(now)) {
                 LocalDateTime scheduled = nextBusinessWindow(now);
                 state.setScheduledSendTime(scheduled);
                 chatRoutineStateRepository.save(state);
-                log.info("⏳ Mensagem reagendada para {} (horário comercial)", scheduled);
+                log.info("⏳ Mensagem reagendada para {}", scheduled);
                 return;
             }
 
-// 3. Se chegou aqui → ENVIAR
-            state.setScheduledSendTime(null); // limpa a fila
+            state.setScheduledSendTime(null);
 
-            // ✅ NOVO: Enviar texto, fotos e vídeos
-            sendRoutineWithMedia(
+            // ✅ ENVIO COM RATE LIMITING E RETRY
+            sendRoutineWithMediaSafe(
                     chat,
                     webInstance,
                     routineToSend,
@@ -310,39 +373,31 @@ public class RoutineAutomationService {
         }
     }
 
-    // Verifica e envia a próxima mensagem de rotina para um chat já em repescagem
     @Async
     private void checkAndSendNextRoutineMessage(Chat chat, User user, List<RoutineText> routines) {
-        // Busca o estado de rotina deste chat
         Optional<ChatRoutineState> stateOpt = chatRoutineStateRepository.findByChatId(chat.getId());
 
-        // Se não existe estado, não faz nada
         if (stateOpt.isEmpty()) {
             return;
         }
 
         ChatRoutineState state = stateOpt.get();
 
-        // Verifica se o cliente respondeu olhando a última mensagem
         Optional<Message> lastMessageOpt = messageRepository
                 .findTopByChatIdOrderByTimestampDesc(chat.getId());
 
         if (lastMessageOpt.isPresent()) {
             Message lastMessage = lastMessageOpt.get();
 
-            // Se a última mensagem foi DO CLIENTE (fromMe=false), remove da repescagem
             if (!lastMessage.getFromMe()) {
-                log.info("📨 [CHAT: {}] Cliente respondeu, removendo da repescagem", chat.getId());
+                log.info("📨 [CHAT: {}] Cliente respondeu", chat.getId());
                 removeFromRepescagem(chat, state, user);
                 return;
             }
         }
 
-        // Se já enviou todas as 7 mensagens da rotina
         if (state.getLastRoutineSent() >= 7) {
-            // Verifica se passou tempo suficiente para mover para Lead Frio
             if (state.getLastAutomatedMessageSent() != null) {
-                // Busca a configuração da última rotina (rotina 7)
                 Optional<RoutineText> lastRoutineOpt = routines.stream()
                         .filter(r -> r.getSequenceNumber() == 7)
                         .findFirst();
@@ -351,13 +406,11 @@ public class RoutineAutomationService {
                     RoutineText lastRoutine = lastRoutineOpt.get();
                     LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
-                    // Calcula quanto tempo passou desde a última mensagem automática
                     long hoursSinceLastAutomated = Duration.between(
                             state.getLastAutomatedMessageSent(),
                             now
                     ).toHours();
 
-                    // Se passou tempo suficiente, move para Lead Frio (cliente não respondeu)
                     if (hoursSinceLastAutomated >= lastRoutine.getHoursDelay()) {
                         moveToLeadFrio(chat, state, user);
                     }
@@ -366,122 +419,94 @@ public class RoutineAutomationService {
             return;
         }
 
-        // Se já enviou alguma mensagem automática antes
         if (state.getLastAutomatedMessageSent() != null) {
             LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
-            // Calcula quanto tempo passou desde a última mensagem automática
             long hoursSinceLastAutomated = Duration.between(
                     state.getLastAutomatedMessageSent(),
                     now
             ).toHours();
 
-            // Calcula qual seria a próxima rotina a ser enviada
             int nextSequence = state.getLastRoutineSent() + 1;
 
-            // Busca a configuração da próxima rotina
             Optional<RoutineText> nextRoutineOpt = routines.stream()
                     .filter(r -> r.getSequenceNumber() == nextSequence)
                     .findFirst();
 
-            // ✅ TRATAMENTO: Se não existe a próxima rotina configurada, move para Lead Frio
             if (nextRoutineOpt.isEmpty()) {
-                log.warn("⚠️ [CHAT: {}] Não há rotina #{} configurada. Movendo para Lead Frio.", chat.getId(), nextSequence);
+                log.warn("⚠️ [CHAT: {}] Rotina #{} não configurada", chat.getId(), nextSequence);
                 moveToLeadFrio(chat, state, user);
                 return;
             }
 
             RoutineText nextRoutine = nextRoutineOpt.get();
 
-            // ✅ TRATAMENTO: Se o textContent está vazio/null, move para Lead Frio
             if (nextRoutine.getTextContent() == null || nextRoutine.getTextContent().trim().isEmpty()) {
-                log.warn("⚠️ [CHAT: {}] Rotina #{} com textContent vazio. Movendo para Lead Frio.", chat.getId(), nextSequence);
+                log.warn("⚠️ [CHAT: {}] Rotina #{} vazia", chat.getId(), nextSequence);
                 moveToLeadFrio(chat, state, user);
                 return;
             }
 
-            // Se passou tempo suficiente (definido no hours_delay da próxima rotina em HORAS)
-            // então envia a próxima mensagem
             if (hoursSinceLastAutomated >= nextRoutine.getHoursDelay()) {
-
-                // Incrementa e salva o estado ANTES do envio do Z-API
                 state.setLastRoutineSent(nextSequence);
                 chatRoutineStateRepository.save(state);
 
-// 1. Caso exista um horário já programado:
-                if (state.getScheduledSendTime() != null) {
-                    if (now.isBefore(state.getScheduledSendTime())) {
-                        return; // ainda não chegou o horário de enviar
-                    }
+                if (state.getScheduledSendTime() != null && now.isBefore(state.getScheduledSendTime())) {
+                    return;
                 }
 
-// 2. Caso não seja horário comercial:
                 if (!isBusinessHours(now)) {
                     LocalDateTime scheduled = nextBusinessWindow(now);
                     state.setScheduledSendTime(scheduled);
                     chatRoutineStateRepository.save(state);
-                    log.info("⏳ Mensagem reagendada para {} (horário comercial)", scheduled);
+                    log.info("⏳ Mensagem reagendada para {}", scheduled);
                     return;
                 }
 
-// 3. Se chegou aqui → ENVIAR
-                state.setScheduledSendTime(null); // limpa a fil
-
+                state.setScheduledSendTime(null);
                 sendNextRoutineMessage(chat, user, state, nextRoutine);
             }
         }
     }
 
-    // Envia a próxima mensagem da rotina para um chat
     private void sendNextRoutineMessage(Chat chat, User user, ChatRoutineState state, RoutineText routine) {
         try {
-            // Busca a instância ativa do WhatsApp do usuário
             Optional<WebInstance> webInstanceOpt = webInstanceRepository.findByUserId(user.getId()).stream()
                     .filter(wi -> "ACTIVE".equals(wi.getStatus()))
                     .findFirst();
 
-            // Se não tem instância ativa, não pode enviar
             if (webInstanceOpt.isEmpty()) {
-                log.error("❌ [CHAT: {}] Usuário {} sem WebInstance ativa", chat.getId(), user.getId());
+                log.error("❌ [CHAT: {}] Sem instância ativa", chat.getId());
                 return;
             }
 
             WebInstance webInstance = webInstanceOpt.get();
-
             state.setInRepescagem(true);
-
-
 
             LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
-// 1. Caso exista um horário já programado:
-            if (state.getScheduledSendTime() != null) {
-                if (now.isBefore(state.getScheduledSendTime())) {
-                    return; // ainda não chegou o horário de enviar
-                }
+            if (state.getScheduledSendTime() != null && now.isBefore(state.getScheduledSendTime())) {
+                return;
             }
 
-// 2. Caso não seja horário comercial:
             if (!isBusinessHours(now)) {
                 LocalDateTime scheduled = nextBusinessWindow(now);
                 state.setScheduledSendTime(scheduled);
                 chatRoutineStateRepository.save(state);
-                log.info("⏳ Mensagem reagendada para {} (horário comercial)", scheduled);
+                log.info("⏳ Mensagem reagendada para {}", scheduled);
                 return;
             }
 
-// 3. Se chegou aqui → ENVIAR
-            state.setScheduledSendTime(null); // limpa a fila
+            state.setScheduledSendTime(null);
 
-            // ✅ NOVO: Enviar texto, fotos e vídeos
-            sendRoutineWithMedia(
+            // ✅ ENVIO COM RATE LIMITING E RETRY
+            sendRoutineWithMediaSafe(
                     chat,
                     webInstance,
                     routine,
                     "Rotina #" + routine.getSequenceNumber()
             );
 
-            // ATUALIZAÇÃO DO TEMPO DE ENVIO APÓS O ENVIO
             state.setLastAutomatedMessageSent(LocalDateTime.now(ZoneId.of("America/Sao_Paulo")));
             chatRoutineStateRepository.save(state);
 
@@ -490,23 +515,238 @@ public class RoutineAutomationService {
         }
     }
 
-    // ✅ MODIFICADO: Move um chat para a coluna "Lead Frio" após completar todas as rotinas sem resposta
-    // Agora envia notificação SSE para atualizar o frontend
+    // ========== ENVIO COM PROTEÇÃO E RETRY ==========
+
+    /**
+     * Versão SEGURA do sendRoutineWithMedia
+     * Implementa rate limiting e retry
+     */
+    private void sendRoutineWithMediaSafe(
+            Chat chat,
+            WebInstance webInstance,
+            RoutineText routine,
+            String messagePrefix
+    ) {
+        // Verifica rate limiting ANTES de tentar enviar
+        if (!canSendMessage(webInstance.getId())) {
+            log.warn("⏸️ [CHAT: {}] Rate limit atingido, reagendando...", chat.getId());
+
+            // Reagenda para daqui 2 minutos
+            scheduleMessageWithDelay(
+                    () -> sendRoutineWithMediaSafe(chat, webInstance, routine, messagePrefix),
+                    120
+            );
+            return;
+        }
+
+        try {
+            sendRoutineWithMediaWithRetry(chat, webInstance, routine, messagePrefix, 0);
+        } catch (Exception e) {
+            log.error("❌ [CHAT: {}] Falha total ao enviar {}", chat.getId(), messagePrefix, e);
+        }
+    }
+
+    /**
+     * Envio com retry automático e backoff exponencial
+     */
+    private void sendRoutineWithMediaWithRetry(
+            Chat chat,
+            WebInstance webInstance,
+            RoutineText routine,
+            String messagePrefix,
+            int attempt
+    ) throws InterruptedException {
+
+        if (attempt >= MAX_RETRY_ATTEMPTS) {
+            log.error("❌ [CHAT: {}] Máximo de tentativas atingido para {}", chat.getId(), messagePrefix);
+            return;
+        }
+
+        try {
+            String greeting = randomGreeting();
+            String fallbackGreeting = randomFallbackGreeting();
+            String chatName = chat.getName();
+            String receiverName = chatName == null || chatName.isBlank()
+                    ? fallbackGreeting
+                    : greeting + chat.getName();
+
+            String messageToSend = receiverName + ", " + routine.getTextContent();
+
+            // ===== TEXTO =====
+            Map<String, Object> result = zapiMessageService.sendTextMessage(
+                    webInstance,
+                    chat.getPhone(),
+                    messageToSend
+            );
+
+            boolean textSent = result != null && Boolean.TRUE.equals(result.get("success"));
+
+            if (textSent) {
+                log.info("✅ [CHAT: {}] {} enviada", chat.getId(), messagePrefix);
+                recordMessageSent(webInstance.getId());
+            } else {
+                log.error("❌ [CHAT: {}] Falha ao enviar {}", chat.getId(), messagePrefix);
+
+                // RETRY com backoff exponencial
+                int retryDelay = INITIAL_RETRY_DELAY_MS * (int) Math.pow(2, attempt);
+                log.info("🔄 Tentativa {} de {} em {}ms", attempt + 1, MAX_RETRY_ATTEMPTS, retryDelay);
+
+                Thread.sleep(retryDelay);
+                sendRoutineWithMediaWithRetry(chat, webInstance, routine, messagePrefix, attempt + 1);
+                return;
+            }
+
+            // Delay antes de enviar mídia
+            Thread.sleep(DELAY_AFTER_TEXT * 1000L);
+
+            // ===== FOTOS =====
+            List<Photo> photos = getRoutinePhotos(routine);
+            if (!photos.isEmpty()) {
+                log.info("📷 [CHAT: {}] Enviando {} foto(s)", chat.getId(), photos.size());
+                for (Photo photo : photos) {
+                    sendPhotoWithRateLimit(chat, webInstance, photo);
+                    Thread.sleep(DELAY_BETWEEN_PHOTOS * 1000L);
+                }
+            }
+
+            // ===== VÍDEOS =====
+            List<Video> videos = getRoutineVideos(routine);
+            if (!videos.isEmpty()) {
+                log.info("🎥 [CHAT: {}] Enviando {} vídeo(s)", chat.getId(), videos.size());
+                for (Video video : videos) {
+                    sendVideoWithRateLimit(chat, webInstance, video);
+                    Thread.sleep(DELAY_BETWEEN_VIDEOS * 1000L);
+                }
+            }
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (Exception e) {
+            log.error("❌ [CHAT: {}] Erro na tentativa {} de envio", chat.getId(), attempt + 1, e);
+
+            if (attempt < MAX_RETRY_ATTEMPTS - 1) {
+                int retryDelay = INITIAL_RETRY_DELAY_MS * (int) Math.pow(2, attempt);
+                Thread.sleep(retryDelay);
+                sendRoutineWithMediaWithRetry(chat, webInstance, routine, messagePrefix, attempt + 1);
+            }
+        }
+    }
+
+    /**
+     * Envia foto com rate limiting
+     */
+    private void sendPhotoWithRateLimit(Chat chat, WebInstance webInstance, Photo photo) {
+        if (!canSendMessage(webInstance.getId())) {
+            log.warn("⏸️ Aguardando rate limit para enviar foto...");
+            try {
+                Thread.sleep(60000); // Aguarda 1 minuto
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        try {
+            PhotoDTO savedPhoto = null;
+            try {
+                savedPhoto = photoService.saveOutgoingPhoto(
+                        chat.getId(),
+                        chat.getPhone(),
+                        photo.getImageUrl(),
+                        webInstance.getId(),
+                        null
+                );
+            } catch (DataIntegrityViolationException e) {
+                log.warn("⚠️ Erro de duplicação ao salvar foto");
+            }
+
+            Map<String, Object> photoResult = zapiMessageService.sendImage(
+                    webInstance,
+                    chat.getPhone(),
+                    photo.getImageUrl()
+            );
+
+            if (photoResult != null && photoResult.containsKey("messageId")) {
+                String photoMessageId = (String) photoResult.get("messageId");
+                log.info("✅ Foto enviada - MessageId: {}", photoMessageId);
+                recordMessageSent(webInstance.getId());
+
+                if (savedPhoto != null) {
+                    try {
+                        photoService.updatePhotoIdAfterSend(savedPhoto.getMessageId(), photoMessageId, "SENT");
+                    } catch (DataIntegrityViolationException e) {
+                        log.warn("⚠️ Erro ao atualizar photo messageId");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar foto: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Envia vídeo com rate limiting
+     */
+    private void sendVideoWithRateLimit(Chat chat, WebInstance webInstance, Video video) {
+        if (!canSendMessage(webInstance.getId())) {
+            log.warn("⏸️ Aguardando rate limit para enviar vídeo...");
+            try {
+                Thread.sleep(60000); // Aguarda 1 minuto
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        try {
+            VideoDTO savedVideo = null;
+            try {
+                savedVideo = videoService.saveOutgoingVideo(
+                        chat.getId(),
+                        chat.getPhone(),
+                        video.getVideoUrl(),
+                        webInstance.getId(),
+                        null
+                );
+            } catch (DataIntegrityViolationException e) {
+                log.warn("⚠️ Erro de duplicação ao salvar vídeo");
+            }
+
+            Map<String, Object> videoResult = zapiMessageService.sendVideo(
+                    webInstance,
+                    chat.getPhone(),
+                    video.getVideoUrl()
+            );
+
+            if (videoResult != null && videoResult.containsKey("messageId")) {
+                String videoMessageId = (String) videoResult.get("messageId");
+                log.info("✅ Vídeo enviado - MessageId: {}", videoMessageId);
+                recordMessageSent(webInstance.getId());
+
+                if (savedVideo != null) {
+                    try {
+                        videoService.updateVideoIdAfterSend(savedVideo.getMessageId(), videoMessageId, "SENT");
+                    } catch (DataIntegrityViolationException e) {
+                        log.warn("⚠️ Erro ao atualizar video messageId");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar vídeo: {}", e.getMessage());
+        }
+    }
+
+    // ========== MÉTODOS AUXILIARES (mantidos) ==========
+
     private void moveToLeadFrio(Chat chat, ChatRoutineState state, User user) {
         try {
-            // Move o chat para a coluna de Lead Frio
             chat.setColumn(LEAD_FRIO_COLUMN);
             chatRepository.save(chat);
-
             log.info("❄️ [CHAT: {}] Movido para Lead Frio", chat.getId());
 
-            // Marca que não está mais em repescagem
             state.setInRepescagem(false);
-            // ✅ NOVO: Marca que a repescagem foi concluída
             state.setRepescagemCompleted(true);
             chatRoutineStateRepository.save(state);
 
-            // ✅ NOVO: Enviar notificação SSE para atualizar frontend
             notificationService.sendTaskCompletedNotification(
                     user.getId(),
                     Map.of(
@@ -517,25 +757,21 @@ public class RoutineAutomationService {
                     )
             );
 
-            log.info("📡 [CHAT: {}] Notificação SSE enviada - Chat movido para Lead Frio", chat.getId());
+            log.info("📡 [CHAT: {}] Notificação SSE enviada", chat.getId());
 
         } catch (Exception e) {
             log.error("❌ [CHAT: {}] Erro ao mover para Lead Frio", chat.getId(), e);
         }
     }
 
-    // Remove um chat da repescagem quando o cliente responde
-    // ✅ MODIFICADO: Tornado público para ser chamado pelo WebhookService
     @Transactional
     public void removeFromRepescagem(Chat chat, ChatRoutineState state, User user) {
         try {
-            // Retorna o chat para a coluna onde ele estava antes da repescagem
             String previousColumn = state.getPreviousColumn();
 
-            // ✅ VALIDAÇÃO: Se previousColumn for null ou vazio, usar coluna padrão
             if (previousColumn == null || previousColumn.isEmpty()) {
-                previousColumn = "inbox"; // Coluna padrão
-                log.warn("⚠️ [CHAT: {}] previousColumn estava null/vazio, usando 'inbox' como padrão", chat.getId());
+                previousColumn = "inbox";
+                log.warn("⚠️ [CHAT: {}] previousColumn vazio, usando 'inbox'", chat.getId());
             }
 
             chat.setColumn(previousColumn);
@@ -543,12 +779,9 @@ public class RoutineAutomationService {
 
             log.info("✅ [CHAT: {}] Removido da Repescagem → {}", chat.getId(), previousColumn);
 
-            // Marca que não está mais em repescagem
-            // Mantém o lastRoutineSent para referência futura
             state.setInRepescagem(false);
             chatRoutineStateRepository.save(state);
 
-            // ✅ NOVO: Enviar notificação SSE para atualizar frontend
             notificationService.sendTaskCompletedNotification(
                     user.getId(),
                     Map.of(
@@ -560,252 +793,84 @@ public class RoutineAutomationService {
                     )
             );
 
-            log.info("📡 [CHAT: {}] Notificação SSE enviada - Chat removido da Repescagem", chat.getId());
+            log.info("📡 [CHAT: {}] Notificação SSE enviada", chat.getId());
 
         } catch (Exception e) {
             log.error("❌ [CHAT: {}] Erro ao remover da repescagem", chat.getId(), e);
         }
     }
 
-    // Método público para resetar manualmente o estado de rotina de um chat
-    // ✅ MELHORADO: Agora remove da Repescagem se o chat estiver lá
     @Transactional
     public void resetChatRoutineState(String chatId) {
         try {
-            // Busca o chat
             Optional<Chat> chatOpt = chatRepository.findById(chatId);
             if (chatOpt.isEmpty()) {
-                log.warn("⚠️ [CHAT: {}] Chat não encontrado ao resetar rotina", chatId);
+                log.warn("⚠️ [CHAT: {}] Chat não encontrado", chatId);
                 return;
             }
 
             Chat chat = chatOpt.get();
             boolean wasInRepescagem = REPESCAGEM_COLUMN.equals(chat.getColumn());
 
-            // Busca o estado e reseta todos os valores
             chatRoutineStateRepository.findByChatId(chatId).ifPresent(state -> {
-                state.setLastRoutineSent(0); // Volta para 0 (nenhuma rotina enviada)
-                state.setLastAutomatedMessageSent(null); // Remove o horário da última mensagem
-                state.setInRepescagem(false); // Marca que não está em repescagem
-                // ✅ NOVO: Reseta a flag de repescagem concluída
+                state.setLastRoutineSent(0);
+                state.setLastAutomatedMessageSent(null);
+                state.setInRepescagem(false);
                 state.setRepescagemCompleted(false);
                 chatRoutineStateRepository.save(state);
 
-                log.info("✅ [CHAT: {}] Estado de rotina resetado (incluindo flag repescagemCompleted)", chatId);
+                log.info("✅ [CHAT: {}] Estado resetado", chatId);
 
-                // ✅ NOVA LÓGICA: Se estava em Repescagem, remove da coluna
                 if (wasInRepescagem) {
-                    log.info("🔄 [CHAT: {}] Chat estava em Repescagem, removendo da coluna...", chatId);
                     removeFromRepescagem(chat, state, chat.getWebInstance().getUser());
                 }
             });
 
         } catch (Exception e) {
-            log.error("❌ [CHAT: {}] Erro ao resetar estado de rotina", chatId, e);
+            log.error("❌ [CHAT: {}] Erro ao resetar estado", chatId, e);
         }
     }
 
     private boolean isBusinessHours(LocalDateTime dateTime) {
-        // Considerar que o servidor pode estar em UTC. Ajustamos para BRT.
         ZonedDateTime brtTime = dateTime.atZone(ZoneId.of("America/Sao_Paulo"));
-
         DayOfWeek dow = brtTime.getDayOfWeek();
         int hour = brtTime.getHour();
-
-        boolean weekday = dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY;
-        boolean businessTime = hour >= 8 && hour < 18;
-
-        return weekday && businessTime;
+        return dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY && hour >= 8 && hour < 18;
     }
 
     private LocalDateTime nextBusinessWindow(LocalDateTime now) {
         ZonedDateTime brt = now.atZone(ZoneId.of("America/Sao_Paulo"));
+        if (isBusinessHours(now)) return now;
 
-        // Ajusta para 08:00 do próprio dia, caso esteja antes
-        if (isBusinessHours(now)) {
-            return now; // Já está no horário comercial
-        }
-
-        // Avança para o próximo dia útil às 08:00
         ZonedDateTime next = brt.withHour(8).withMinute(0).withSecond(0).plusDays(1);
-
-        // Pular finais de semana
-        while (next.getDayOfWeek() == DayOfWeek.SATURDAY ||
-                next.getDayOfWeek() == DayOfWeek.SUNDAY) {
+        while (next.getDayOfWeek() == DayOfWeek.SATURDAY || next.getDayOfWeek() == DayOfWeek.SUNDAY) {
             next = next.plusDays(1);
         }
-
-        // Volta para LocalDateTime em UTC (para consistência no banco)
         return next.withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
     }
 
-    /**
-     * ✅ NOVO: Obter fotos da galeria para a rotina
-     */
     private List<Photo> getRoutinePhotos(RoutineText routine) {
         if (routine.getPhotoIds() == null || routine.getPhotoIds().isEmpty()) {
             return new ArrayList<>();
         }
-
         List<String> photoIds = Arrays.asList(routine.getPhotoIds().split(","));
         return photoRepository.findAllById(photoIds);
     }
 
-    /**
-     * ✅ NOVO: Obter vídeos da galeria para a rotina
-     */
     private List<Video> getRoutineVideos(RoutineText routine) {
         if (routine.getVideoIds() == null || routine.getVideoIds().isEmpty()) {
             return new ArrayList<>();
         }
-
         List<String> videoIds = Arrays.asList(routine.getVideoIds().split(","));
         return videoRepository.findAllById(videoIds);
     }
 
-    /**
-     * ✅ NOVO: Enviar texto, fotos e vídeos de uma rotina
-     * Segue o fluxo: texto → fotos → vídeos
-     */
-    private void sendRoutineWithMedia(
-            Chat chat,
-            WebInstance webInstance,
-            RoutineText routine,
-            String messagePrefix
-    ) throws InterruptedException {
-        String greeting = randomGreeting();
-        String fallbackGreeting = randomFallbackGreeting();
-
-        String chatName = chat.getName();
-        String receiverName = chatName == null || chatName.isBlank() ? fallbackGreeting : greeting + chat.getName();
-
-        String messageToSend = receiverName + ", " + routine.getTextContent();
-        // ===== PASSO 1: Enviar mensagem de texto =====
-        Map<String, Object> result = zapiMessageService.sendTextMessage(
-                webInstance,
-                chat.getPhone(),
-                messageToSend
-        );
-
-        boolean textSent = result != null && Boolean.TRUE.equals(result.get("success"));
-
-        if (textSent) {
-            log.info("✅ [CHAT: {}] {} enviada", chat.getId(), messagePrefix);
-        } else {
-            log.error("❌ [CHAT: {}] Falha ao enviar {}", chat.getId(), messagePrefix);
-        }
-
-        // Delay entre mensagem e fotos
-        Thread.sleep(20000);
-
-        // ===== PASSO 2: Enviar fotos (se houver) =====
-        List<Photo> photos = getRoutinePhotos(routine);
-        if (!photos.isEmpty()) {
-            log.info("📷 [CHAT: {}] Enviando {} foto(s)", chat.getId(), photos.size());
-            for (Photo photo : photos) {
-                try {
-                    PhotoDTO savedPhoto = null;
-                    try {
-                        savedPhoto = photoService.saveOutgoingPhoto(
-                                chat.getId(),
-                                chat.getPhone(),
-                                photo.getImageUrl(),
-                                webInstance.getId(),
-                                null
-                        );
-                    } catch (DataIntegrityViolationException e) {
-                        log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
-                    }
-
-                    Map<String, Object> photoResult = zapiMessageService.sendImage(
-                            webInstance,
-                            chat.getPhone(),
-                            photo.getImageUrl()
-                    );
-
-                    if (photoResult != null && photoResult.containsKey("messageId")) {
-                        String photoMessageId = (String) photoResult.get("messageId");
-                        log.info("✅ Foto enviada - MessageId: {}", photoMessageId);
-
-                        if (savedPhoto != null) {
-                            try {
-                                photoService.updatePhotoIdAfterSend(savedPhoto.getMessageId(), photoMessageId, "SENT");
-                            } catch (DataIntegrityViolationException e) {
-                                log.warn("⚠️ Erro de duplicação ao atualizar photo messageId. Ignorando.");
-                            }
-                        }
-                    }
-
-                    Thread.sleep(2000);
-
-                } catch (Exception e) {
-                    log.error("❌ Erro ao enviar foto: {}", e.getMessage());
-                }
-            }
-        }
-
-        // ===== PASSO 3: Enviar vídeos (se houver) =====
-        List<Video> videos = getRoutineVideos(routine);
-        if (!videos.isEmpty()) {
-            log.info("🎥 [CHAT: {}] Enviando {} vídeo(s)", chat.getId(), videos.size());
-            for (Video video : videos) {
-                try {
-                    VideoDTO savedVideo = null;
-                    try {
-                        savedVideo = videoService.saveOutgoingVideo(
-                                chat.getId(),
-                                chat.getPhone(),
-                                video.getVideoUrl(),
-                                webInstance.getId(),
-                                null
-                        );
-                    } catch (DataIntegrityViolationException e) {
-                        log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
-                    }
-
-                    Map<String, Object> videoResult = zapiMessageService.sendVideo(
-                            webInstance,
-                            chat.getPhone(),
-                            video.getVideoUrl()
-                    );
-
-                    if (videoResult != null && videoResult.containsKey("messageId")) {
-                        String videoMessageId = (String) videoResult.get("messageId");
-                        log.info("✅ Vídeo enviado - MessageId: {}", videoMessageId);
-
-                        if (savedVideo != null) {
-                            try {
-                                videoService.updateVideoIdAfterSend(savedVideo.getMessageId(), videoMessageId, "SENT");
-                            } catch (DataIntegrityViolationException e) {
-                                log.warn("⚠️ Erro de duplicação ao atualizar video messageId. Ignorando.");
-                            }
-                        }
-                    }
-
-                    Thread.sleep(20000);
-
-                } catch (Exception e) {
-                    log.error("❌ Erro ao enviar vídeo: {}", e.getMessage());
-                }
-            }
-        }
-    }
-
-
     private static final List<String> GREETINGS = List.of(
-            "Olá ",
-            "Oi ",
-            "Oii ",
-            "Oiii ",
-            "Oie ",
-            "Oiee ",
-            "Oieeê "
+            "Olá ", "Oi ", "Oii ", "Oiii ", "Oie ", "Oiee ", "Oieeê "
     );
 
     private static final List<String> FALLBACK_GREETINGS = List.of(
-            "Oii querid@",
-            "Olá! Espero que esteja bem",
-            "Oiê! Como vai?"
+            "Oii querid@", "Olá! Espero que esteja bem", "Oiê! Como vai?"
     );
 
     private static final Random RANDOM = new Random();
@@ -818,4 +883,66 @@ public class RoutineAutomationService {
         return FALLBACK_GREETINGS.get(RANDOM.nextInt(FALLBACK_GREETINGS.size()));
     }
 
+    // ========== CLASSES AUXILIARES ==========
+
+    /**
+     * Rate Limiter simples usando Token Bucket
+     */
+    private static class RateLimiter {
+        private final int maxTokens;
+        private int tokens;
+        private long lastRefillTime;
+        private final long refillIntervalMs = 60000; // 1 minuto
+
+        public RateLimiter(int maxTokens) {
+            this.maxTokens = maxTokens;
+            this.tokens = maxTokens;
+            this.lastRefillTime = System.currentTimeMillis();
+        }
+
+        public synchronized boolean tryAcquire() {
+            refillTokens();
+            if (tokens > 0) {
+                tokens--;
+                return true;
+            }
+            return false;
+        }
+
+        private void refillTokens() {
+            long now = System.currentTimeMillis();
+            long timePassed = now - lastRefillTime;
+
+            if (timePassed >= refillIntervalMs) {
+                tokens = maxTokens;
+                lastRefillTime = now;
+            }
+        }
+    }
+
+    /**
+     * Contador de mensagens por hora
+     */
+    private static class HourlyMessageCounter {
+        private final int maxMessagesPerHour;
+        private final Queue<Long> timestamps = new ConcurrentLinkedQueue<>();
+
+        public HourlyMessageCounter(int maxMessagesPerHour) {
+            this.maxMessagesPerHour = maxMessagesPerHour;
+        }
+
+        public synchronized boolean canSend() {
+            cleanOldTimestamps();
+            return timestamps.size() < maxMessagesPerHour;
+        }
+
+        public synchronized void recordMessage() {
+            timestamps.offer(System.currentTimeMillis());
+        }
+
+        private void cleanOldTimestamps() {
+            long oneHourAgo = System.currentTimeMillis() - 3600000;
+            timestamps.removeIf(ts -> ts < oneHourAgo);
+        }
+    }
 }
