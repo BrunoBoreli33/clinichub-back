@@ -30,16 +30,16 @@ public class ZapiMessageService {
     /**
      * ✅ MODIFICADO: Enviar mensagem de texto via Z-API
      */
-    public Map<String, Object> sendTextMessage(WebInstance instance, String phone, String message) {
-
+    public Map<String, Object> sendTextMessage(WebInstance instance, String phone, String message, boolean isAutomatedRoutine) {
         String instanceId = instance.getUser().getId();
         long now = System.currentTimeMillis();
-
-        Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
-        if (nextAllowedTime != null && now < nextAllowedTime) {
-            long secondsLeft = (nextAllowedTime - now) / 1000;
-            log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
-            return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+        if (isAutomatedRoutine) {
+            Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
+            if (nextAllowedTime != null && now < nextAllowedTime) {
+                long secondsLeft = (nextAllowedTime - now) / 1000;
+                log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
+                return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+            }
         }
 
         try {
@@ -75,11 +75,14 @@ public class ZapiMessageService {
             log.info("✅ Mensagem enviada com sucesso - MessageId: {}",
                     result != null ? result.get("messageId") : "N/A");
 
-            long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
-            rateLimits.put(instanceId, now + randomDelay);
+            if (isAutomatedRoutine) {
+                long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
+                rateLimits.put(instanceId, now + randomDelay);
 
-            log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
-                    instanceId, randomDelay / 1000);
+                log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
+                        instanceId, randomDelay / 1000);
+
+            }
 
             return result;
 
@@ -185,17 +188,19 @@ public class ZapiMessageService {
     /**
      * ✅ NOVO: Enviar imagem via Z-API
      */
-    public Map<String, Object> sendImage(WebInstance instance, String phone, String image) {
+    public Map<String, Object> sendImage(WebInstance instance, String phone, String image, boolean isAutomatedRoutine) {
         try {
 
             String instanceId = instance.getUser().getId();
             long now = System.currentTimeMillis();
 
-            Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
-            if (nextAllowedTime != null && now < nextAllowedTime) {
-                long secondsLeft = (nextAllowedTime - now) / 1000;
-                log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
-                return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+            if (isAutomatedRoutine) {
+                Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
+                if (nextAllowedTime != null && now < nextAllowedTime) {
+                    long secondsLeft = (nextAllowedTime - now) / 1000;
+                    log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
+                    return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+                }
             }
 
             String url = String.format("%s/instances/%s/token/%s/send-image",
@@ -230,11 +235,13 @@ public class ZapiMessageService {
             log.info("✅ Imagem enviada com sucesso - MessageId: {}",
                     result != null ? result.get("messageId") : "N/A");
 
-            long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
-            rateLimits.put(instanceId, now + randomDelay);
+            if (isAutomatedRoutine) {
+                long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
+                rateLimits.put(instanceId, now + randomDelay);
 
-            log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
-                    instanceId, randomDelay / 1000);
+                log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
+                        instanceId, randomDelay / 1000);
+            }
 
             return result;
 
@@ -247,17 +254,19 @@ public class ZapiMessageService {
     /**
      * ✅ NOVO: Enviar vídeo via Z-API
      */
-    public Map<String, Object> sendVideo(WebInstance instance, String phone, String video) {
+    public Map<String, Object> sendVideo(WebInstance instance, String phone, String video, boolean isAutomatedRoutine) {
         try {
 
             String instanceId = instance.getUser().getId();
             long now = System.currentTimeMillis();
 
-            Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
-            if (nextAllowedTime != null && now < nextAllowedTime) {
-                long secondsLeft = (nextAllowedTime - now) / 1000;
-                log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
-                return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+            if (isAutomatedRoutine) {
+                Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
+                if (nextAllowedTime != null && now < nextAllowedTime) {
+                    long secondsLeft = (nextAllowedTime - now) / 1000;
+                    log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
+                    return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+                }
             }
 
             String url = String.format("%s/instances/%s/token/%s/send-video",
@@ -292,11 +301,14 @@ public class ZapiMessageService {
             log.info("✅ Vídeo enviado com sucesso - MessageId: {}",
                     result != null ? result.get("messageId") : "N/A");
 
-            long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
-            rateLimits.put(instanceId, now + randomDelay);
+            if (isAutomatedRoutine) {
+                long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
+                rateLimits.put(instanceId, now + randomDelay);
 
-            log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
-                    instanceId, randomDelay / 1000);
+                log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
+                        instanceId, randomDelay / 1000);
+
+            }
 
             return result;
 

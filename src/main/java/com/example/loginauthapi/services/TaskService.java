@@ -306,7 +306,8 @@ public class TaskService {
             Map<String, Object> result = zapiMessageService.sendTextMessage(
                     instance,
                     chat.getPhone(),
-                    task.getMessage()
+                    task.getMessage(),
+                    false
             );
 
             if (result != null && result.get("messageId") != null) {
