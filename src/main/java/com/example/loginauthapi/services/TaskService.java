@@ -303,7 +303,7 @@ public class TaskService {
             WebInstance instance = instanceOpt.get();
 
             // Enviar mensagem via Z-API
-            Map<String, Object> result = zapiMessageService.sendTextMessage(
+            Map<String, Object> result = zapiMessageService.sendTextMessageWithRetry(
                     instance,
                     chat.getPhone(),
                     task.getMessage(),
