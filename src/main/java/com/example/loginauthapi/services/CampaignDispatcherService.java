@@ -152,7 +152,7 @@ public class CampaignDispatcherService {
                     }
 
                     // Enviar via Z-API (CRÍTICO)
-                    Map<String, Object> zapiResult = zapiMessageService.sendTextMessage(
+                    Map<String, Object> zapiResult = zapiMessageService.sendTextMessageWithRetry(
                             instance,
                             chat.getPhone(),
                             campaign.getMessage(),
@@ -201,7 +201,7 @@ public class CampaignDispatcherService {
                                 log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
                             }
 
-                            Map<String, Object> photoResult = zapiMessageService.sendImage(
+                            Map<String, Object> photoResult = zapiMessageService.sendImageWithRetry(
                                     instance,
                                     chat.getPhone(),
                                     photo.getImageUrl(),
@@ -247,7 +247,7 @@ public class CampaignDispatcherService {
                                 log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
                             }
 
-                            Map<String, Object> videoResult = zapiMessageService.sendVideo(
+                            Map<String, Object> videoResult = zapiMessageService.sendVideoWithRetry(
                                     instance,
                                     chat.getPhone(),
                                     video.getVideoUrl(),

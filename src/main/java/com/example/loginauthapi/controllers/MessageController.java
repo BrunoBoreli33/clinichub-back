@@ -361,7 +361,7 @@ public class MessageController {
             log.info("📨 Enviando mensagem via Z-API - Phone: {}, Instance: {}",
                     phone, instance.getSuaInstancia());
 
-            Map<String, Object> zapiResult = zapiMessageService.sendTextMessage(instance, phone, message, false);
+            Map<String, Object> zapiResult = zapiMessageService.sendTextMessageWithRetry(instance, phone, message, false);
 
             // ✅ PASSO 3: Atualizar com o messageId real do WhatsApp
             if (zapiResult != null && zapiResult.containsKey("messageId")) {
@@ -506,7 +506,7 @@ public class MessageController {
 
             // ✅ PASSO 2: Enviar via Z-API (SEM CAPTION)
             log.info("📨 Enviando imagem via Z-API - Phone: {}", phone);
-            Map<String, Object> zapiResult = zapiMessageService.sendImage(
+            Map<String, Object> zapiResult = zapiMessageService.sendImageWithRetry(
                     instance, phone, image, false
             );
 
@@ -566,7 +566,7 @@ public class MessageController {
 
             // ✅ PASSO 2: Enviar via Z-API (SEM CAPTION)
             log.info("📨 Enviando vídeo via Z-API - Phone: {}", phone);
-            Map<String, Object> zapiResult = zapiMessageService.sendVideo(
+            Map<String, Object> zapiResult = zapiMessageService.sendVideoWithRetry(
                     instance, phone, video, false
             );
 
@@ -625,7 +625,7 @@ public class MessageController {
 
             // ✅ PASSO 2: Enviar via Z-API
             log.info("📨 Enviando imagem via Z-API - Phone: {}", phone);
-            Map<String, Object> zapiResult = zapiMessageService.sendImage(
+            Map<String, Object> zapiResult = zapiMessageService.sendImageWithRetry(
                     instance, phone, image, false
             );
 
@@ -683,7 +683,7 @@ public class MessageController {
 
             // ✅ PASSO 2: Enviar via Z-API
             log.info("📨 Enviando vídeo via Z-API - Phone: {}", phone);
-            Map<String, Object> zapiResult = zapiMessageService.sendVideo(
+            Map<String, Object> zapiResult = zapiMessageService.sendVideoWithRetry(
                     instance, phone, video, false
             );
 
