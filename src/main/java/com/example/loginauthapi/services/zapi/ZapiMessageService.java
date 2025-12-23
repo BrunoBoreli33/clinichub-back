@@ -1,11 +1,16 @@
 package com.example.loginauthapi.services.zapi;
 
 import com.example.loginauthapi.entities.WebInstance;
+import com.example.loginauthapi.exceptions.RateLimitException;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Recover;
+import org.springframework.retry.annotation.Retryable;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -27,10 +32,33 @@ public class ZapiMessageService {
             .expireAfterWrite(8, TimeUnit.MINUTES)
             .build();
 
+    private final Cache<String, Long> photoRateLimits = Caffeine.newBuilder()
+            .expireAfterWrite(8, TimeUnit.MINUTES)
+            .build();
+
+    private final Cache<String, Long> videosRateLimits = Caffeine.newBuilder()
+            .expireAfterWrite(8, TimeUnit.MINUTES)
+            .build();
+
+
+    @Async
+    public Map<String, Object> sendTextMessage(WebInstance instance, String phone, String message, boolean isAutomatedRoutine) {
+        return sendTextMessageWithRetry(instance, phone, message, isAutomatedRoutine);
+    }
+
     /**
      * ✅ MODIFICADO: Enviar mensagem de texto via Z-API
      */
-    public Map<String, Object> sendTextMessage(WebInstance instance, String phone, String message, boolean isAutomatedRoutine) {
+    @Retryable(
+            retryFor = { RateLimitException.class, Exception.class },
+            maxAttempts = 300, // Garante um pouco mais de 24h
+            backoff = @Backoff(
+                    delay = 5000,
+                    multiplier = 2.0,
+                    maxDelay = 300000 // 5 minutos
+            )
+    )
+    public Map<String, Object> sendTextMessageWithRetry(WebInstance instance, String phone, String message, boolean isAutomatedRoutine) {
         String instanceId = instance.getUser().getId();
         long now = System.currentTimeMillis();
         if (isAutomatedRoutine) {
@@ -38,7 +66,7 @@ public class ZapiMessageService {
             if (nextAllowedTime != null && now < nextAllowedTime) {
                 long secondsLeft = (nextAllowedTime - now) / 1000;
                 log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
-                return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+                throw new RateLimitException("Cooldown ativo para " + instanceId);
             }
         }
 
@@ -185,17 +213,31 @@ public class ZapiMessageService {
         }
     }
 
-    /**
-     * ✅ NOVO: Enviar imagem via Z-API
-     */
+    @Async
     public Map<String, Object> sendImage(WebInstance instance, String phone, String image, boolean isAutomatedRoutine) {
+        return sendImageWithRetry(instance, phone, image, isAutomatedRoutine);
+    }
+
+        /**
+         * ✅ NOVO: Enviar imagem via Z-API
+         */
+        @Retryable(
+                retryFor = { RateLimitException.class, Exception.class },
+                maxAttempts = 300, // Garante um pouco mais de 24h
+                backoff = @Backoff(
+                        delay = 5000,
+                        multiplier = 2.0,
+                        maxDelay = 300000 // 5 minutos
+                )
+        )
+    public Map<String, Object> sendImageWithRetry(WebInstance instance, String phone, String image, boolean isAutomatedRoutine) {
         try {
 
             String instanceId = instance.getUser().getId();
             long now = System.currentTimeMillis();
 
             if (isAutomatedRoutine) {
-                Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
+                Long nextAllowedTime = photoRateLimits.getIfPresent(instanceId);
                 if (nextAllowedTime != null && now < nextAllowedTime) {
                     long secondsLeft = (nextAllowedTime - now) / 1000;
                     log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
@@ -237,7 +279,7 @@ public class ZapiMessageService {
 
             if (isAutomatedRoutine) {
                 long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
-                rateLimits.put(instanceId, now + randomDelay);
+                photoRateLimits.put(instanceId, now + randomDelay);
 
                 log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
                         instanceId, randomDelay / 1000);
@@ -251,17 +293,31 @@ public class ZapiMessageService {
         }
     }
 
-    /**
-     * ✅ NOVO: Enviar vídeo via Z-API
-     */
+    @Async
     public Map<String, Object> sendVideo(WebInstance instance, String phone, String video, boolean isAutomatedRoutine) {
+            return sendVideoWithRetry(instance, phone, video, isAutomatedRoutine);
+    }
+
+        /**
+         * ✅ NOVO: Enviar vídeo via Z-API
+         */
+        @Retryable(
+                retryFor = { RateLimitException.class, Exception.class },
+                maxAttempts = 300, // Garante um pouco mais de 24h
+                backoff = @Backoff(
+                        delay = 5000,
+                        multiplier = 2.0,
+                        maxDelay = 300000 // 5 minutos
+                )
+        )
+    public Map<String, Object> sendVideoWithRetry(WebInstance instance, String phone, String video, boolean isAutomatedRoutine) {
         try {
 
             String instanceId = instance.getUser().getId();
             long now = System.currentTimeMillis();
 
             if (isAutomatedRoutine) {
-                Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
+                Long nextAllowedTime = videosRateLimits.getIfPresent(instanceId);
                 if (nextAllowedTime != null && now < nextAllowedTime) {
                     long secondsLeft = (nextAllowedTime - now) / 1000;
                     log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
@@ -303,7 +359,7 @@ public class ZapiMessageService {
 
             if (isAutomatedRoutine) {
                 long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
-                rateLimits.put(instanceId, now + randomDelay);
+                videosRateLimits.put(instanceId, now + randomDelay);
 
                 log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
                         instanceId, randomDelay / 1000);
@@ -459,4 +515,11 @@ public class ZapiMessageService {
             throw new RuntimeException("Erro ao excluir mensagem via Z-API: " + e.getMessage(), e);
         }
     }
+
+    @Recover
+    public Map<String, Object> recover(Exception e, WebInstance instance, String phone, String message) {
+        log.error("🛑 FALHA CRÍTICA: Mensagem para {} perdida após exaustão de retentativas. Erro: {}", phone, e.getMessage());
+        return Map.of("status", "failed", "message", "Não foi possível enviar após várias tentativas.");
+    }
+
 }

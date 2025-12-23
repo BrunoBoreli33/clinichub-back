@@ -2,6 +2,7 @@ package com.example.loginauthapi;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
@@ -10,6 +11,7 @@ import java.util.TimeZone;
 @SpringBootApplication
 @EnableScheduling  // ✅ NOVO: Habilita agendamento de tarefas
 @EnableAsync
+@EnableRetry
 public class LoginAuthApiApplication {
 
 	public static void main(String[] args) {
