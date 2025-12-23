@@ -667,7 +667,8 @@ public class RoutineAutomationService {
         Map<String, Object> result = zapiMessageService.sendTextMessage(
                 webInstance,
                 chat.getPhone(),
-                messageToSend
+                messageToSend,
+                true
         );
 
         boolean textSent = result != null && Boolean.TRUE.equals(result.get("success"));
@@ -700,7 +701,8 @@ public class RoutineAutomationService {
                     Map<String, Object> photoResult = zapiMessageService.sendImage(
                             webInstance,
                             chat.getPhone(),
-                            photo.getImageUrl()
+                            photo.getImageUrl(),
+                            true
                     );
 
                     if (photoResult != null && photoResult.containsKey("messageId")) {
@@ -743,7 +745,8 @@ public class RoutineAutomationService {
                     Map<String, Object> videoResult = zapiMessageService.sendVideo(
                             webInstance,
                             chat.getPhone(),
-                            video.getVideoUrl()
+                            video.getVideoUrl(),
+                            true
                     );
 
                     if (videoResult != null && videoResult.containsKey("messageId")) {

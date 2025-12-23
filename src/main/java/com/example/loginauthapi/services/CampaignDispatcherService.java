@@ -155,7 +155,8 @@ public class CampaignDispatcherService {
                     Map<String, Object> zapiResult = zapiMessageService.sendTextMessage(
                             instance,
                             chat.getPhone(),
-                            campaign.getMessage()
+                            campaign.getMessage(),
+                            false
                     );
 
                     if (zapiResult != null && zapiResult.containsKey("messageId")) {
@@ -203,7 +204,8 @@ public class CampaignDispatcherService {
                             Map<String, Object> photoResult = zapiMessageService.sendImage(
                                     instance,
                                     chat.getPhone(),
-                                    photo.getImageUrl()
+                                    photo.getImageUrl(),
+                                    false
                             );
 
                             if (photoResult != null && photoResult.containsKey("messageId")) {
@@ -248,7 +250,8 @@ public class CampaignDispatcherService {
                             Map<String, Object> videoResult = zapiMessageService.sendVideo(
                                     instance,
                                     chat.getPhone(),
-                                    video.getVideoUrl()
+                                    video.getVideoUrl(),
+                                    false
                             );
 
                             if (videoResult != null && videoResult.containsKey("messageId")) {

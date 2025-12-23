@@ -361,7 +361,7 @@ public class MessageController {
             log.info("📨 Enviando mensagem via Z-API - Phone: {}, Instance: {}",
                     phone, instance.getSuaInstancia());
 
-            Map<String, Object> zapiResult = zapiMessageService.sendTextMessage(instance, phone, message);
+            Map<String, Object> zapiResult = zapiMessageService.sendTextMessage(instance, phone, message, false);
 
             // ✅ PASSO 3: Atualizar com o messageId real do WhatsApp
             if (zapiResult != null && zapiResult.containsKey("messageId")) {
@@ -507,7 +507,7 @@ public class MessageController {
             // ✅ PASSO 2: Enviar via Z-API (SEM CAPTION)
             log.info("📨 Enviando imagem via Z-API - Phone: {}", phone);
             Map<String, Object> zapiResult = zapiMessageService.sendImage(
-                    instance, phone, image
+                    instance, phone, image, false
             );
 
             // ✅ PASSO 3: Atualizar com messageId real
@@ -567,7 +567,7 @@ public class MessageController {
             // ✅ PASSO 2: Enviar via Z-API (SEM CAPTION)
             log.info("📨 Enviando vídeo via Z-API - Phone: {}", phone);
             Map<String, Object> zapiResult = zapiMessageService.sendVideo(
-                    instance, phone, video
+                    instance, phone, video, false
             );
 
             // ✅ PASSO 3: Atualizar com messageId real
@@ -626,7 +626,7 @@ public class MessageController {
             // ✅ PASSO 2: Enviar via Z-API
             log.info("📨 Enviando imagem via Z-API - Phone: {}", phone);
             Map<String, Object> zapiResult = zapiMessageService.sendImage(
-                    instance, phone, image
+                    instance, phone, image, false
             );
 
             // ✅ PASSO 3: Atualizar com messageId real
@@ -684,7 +684,7 @@ public class MessageController {
             // ✅ PASSO 2: Enviar via Z-API
             log.info("📨 Enviando vídeo via Z-API - Phone: {}", phone);
             Map<String, Object> zapiResult = zapiMessageService.sendVideo(
-                    instance, phone, video
+                    instance, phone, video, false
             );
 
             // ✅ PASSO 3: Atualizar com messageId real
