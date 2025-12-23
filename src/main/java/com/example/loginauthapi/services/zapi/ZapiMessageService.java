@@ -42,8 +42,8 @@ public class ZapiMessageService {
 
 
     @Async
-    public Map<String, Object> sendTextMessage(WebInstance instance, String phone, String message, boolean isAutomatedRoutine) {
-        return sendTextMessageWithRetry(instance, phone, message, isAutomatedRoutine);
+    public void sendTextMessage(WebInstance instance, String phone, String message, boolean isAutomatedRoutine) {
+        sendTextMessageWithRetry(instance, phone, message, isAutomatedRoutine);
     }
 
     /**
@@ -214,8 +214,8 @@ public class ZapiMessageService {
     }
 
     @Async
-    public Map<String, Object> sendImage(WebInstance instance, String phone, String image, boolean isAutomatedRoutine) {
-        return sendImageWithRetry(instance, phone, image, isAutomatedRoutine);
+    public void sendImage(WebInstance instance, String phone, String image, boolean isAutomatedRoutine) {
+        sendImageWithRetry(instance, phone, image, isAutomatedRoutine);
     }
 
         /**
@@ -294,8 +294,8 @@ public class ZapiMessageService {
     }
 
     @Async
-    public Map<String, Object> sendVideo(WebInstance instance, String phone, String video, boolean isAutomatedRoutine) {
-            return sendVideoWithRetry(instance, phone, video, isAutomatedRoutine);
+    public void sendVideo(WebInstance instance, String phone, String video, boolean isAutomatedRoutine) {
+            sendVideoWithRetry(instance, phone, video, isAutomatedRoutine);
     }
 
         /**

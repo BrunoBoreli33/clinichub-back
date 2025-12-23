@@ -664,30 +664,21 @@ public class RoutineAutomationService {
 
         String messageToSend = receiverName + ", " + routine.getTextContent();
         // ===== PASSO 1: Enviar mensagem de texto =====
-        Map<String, Object> result = zapiMessageService.sendTextMessage(
+        zapiMessageService.sendTextMessage(
                 webInstance,
                 chat.getPhone(),
                 messageToSend,
                 true
         );
 
-        boolean textSent = result != null && Boolean.TRUE.equals(result.get("success"));
-
-        if (textSent) {
-            log.info("✅ [CHAT: {}] {} enviada", chat.getId(), messagePrefix);
-        } else {
-            log.error("❌ [CHAT: {}] Falha ao enviar {}", chat.getId(), messagePrefix);
-        }
-
         // ===== PASSO 2: Enviar fotos (se houver) =====
         List<Photo> photos = getRoutinePhotos(routine);
         if (!photos.isEmpty()) {
             log.info("📷 [CHAT: {}] Enviando {} foto(s)", chat.getId(), photos.size());
             for (Photo photo : photos) {
-                try {
-                    PhotoDTO savedPhoto = null;
+
                     try {
-                        savedPhoto = photoService.saveOutgoingPhoto(
+                        photoService.saveOutgoingPhoto(
                                 chat.getId(),
                                 chat.getPhone(),
                                 photo.getImageUrl(),
@@ -698,29 +689,14 @@ public class RoutineAutomationService {
                         log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
                     }
 
-                    Map<String, Object> photoResult = zapiMessageService.sendImage(
+                    zapiMessageService.sendImage(
                             webInstance,
                             chat.getPhone(),
                             photo.getImageUrl(),
                             true
                     );
 
-                    if (photoResult != null && photoResult.containsKey("messageId")) {
-                        String photoMessageId = (String) photoResult.get("messageId");
-                        log.info("✅ Foto enviada - MessageId: {}", photoMessageId);
-
-                        if (savedPhoto != null) {
-                            try {
-                                photoService.updatePhotoIdAfterSend(savedPhoto.getMessageId(), photoMessageId, "SENT");
-                            } catch (DataIntegrityViolationException e) {
-                                log.warn("⚠️ Erro de duplicação ao atualizar photo messageId. Ignorando.");
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    log.error("❌ Erro ao enviar foto: {}", e.getMessage());
                 }
-            }
         }
 
         // ===== PASSO 3: Enviar vídeos (se houver) =====
@@ -728,10 +704,9 @@ public class RoutineAutomationService {
         if (!videos.isEmpty()) {
             log.info("🎥 [CHAT: {}] Enviando {} vídeo(s)", chat.getId(), videos.size());
             for (Video video : videos) {
-                try {
-                    VideoDTO savedVideo = null;
+
                     try {
-                        savedVideo = videoService.saveOutgoingVideo(
+                        videoService.saveOutgoingVideo(
                                 chat.getId(),
                                 chat.getPhone(),
                                 video.getVideoUrl(),
@@ -742,29 +717,13 @@ public class RoutineAutomationService {
                         log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
                     }
 
-                    Map<String, Object> videoResult = zapiMessageService.sendVideo(
+                    zapiMessageService.sendVideo(
                             webInstance,
                             chat.getPhone(),
                             video.getVideoUrl(),
                             true
                     );
 
-                    if (videoResult != null && videoResult.containsKey("messageId")) {
-                        String videoMessageId = (String) videoResult.get("messageId");
-                        log.info("✅ Vídeo enviado - MessageId: {}", videoMessageId);
-
-                        if (savedVideo != null) {
-                            try {
-                                videoService.updateVideoIdAfterSend(savedVideo.getMessageId(), videoMessageId, "SENT");
-                            } catch (DataIntegrityViolationException e) {
-                                log.warn("⚠️ Erro de duplicação ao atualizar video messageId. Ignorando.");
-                            }
-                        }
-                    }
-
-                } catch (Exception e) {
-                    log.error("❌ Erro ao enviar vídeo: {}", e.getMessage());
-                }
             }
         }
     }
