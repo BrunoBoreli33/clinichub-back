@@ -1,6 +1,8 @@
 package com.example.loginauthapi.services.zapi;
 
 import com.example.loginauthapi.entities.WebInstance;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
@@ -10,6 +12,8 @@ import org.springframework.web.client.RestTemplate;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -19,10 +23,25 @@ public class ZapiMessageService {
     private static final String ZAPI_BASE_URL = "https://api.z-api.io";
     private final RestTemplate restTemplate;
 
+    private final Cache<String, Long> rateLimits = Caffeine.newBuilder()
+            .expireAfterWrite(8, TimeUnit.MINUTES)
+            .build();
+
     /**
      * ✅ MODIFICADO: Enviar mensagem de texto via Z-API
      */
     public Map<String, Object> sendTextMessage(WebInstance instance, String phone, String message) {
+
+        String instanceId = instance.getUser().getId();
+        long now = System.currentTimeMillis();
+
+        Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
+        if (nextAllowedTime != null && now < nextAllowedTime) {
+            long secondsLeft = (nextAllowedTime - now) / 1000;
+            log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
+            return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+        }
+
         try {
             String url = String.format("%s/instances/%s/token/%s/send-text",
                     ZAPI_BASE_URL,
@@ -55,6 +74,12 @@ public class ZapiMessageService {
             var result = response.getBody();
             log.info("✅ Mensagem enviada com sucesso - MessageId: {}",
                     result != null ? result.get("messageId") : "N/A");
+
+            long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
+            rateLimits.put(instanceId, now + randomDelay);
+
+            log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
+                    instanceId, randomDelay / 1000);
 
             return result;
 
@@ -162,6 +187,17 @@ public class ZapiMessageService {
      */
     public Map<String, Object> sendImage(WebInstance instance, String phone, String image) {
         try {
+
+            String instanceId = instance.getUser().getId();
+            long now = System.currentTimeMillis();
+
+            Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
+            if (nextAllowedTime != null && now < nextAllowedTime) {
+                long secondsLeft = (nextAllowedTime - now) / 1000;
+                log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
+                return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+            }
+
             String url = String.format("%s/instances/%s/token/%s/send-image",
                     ZAPI_BASE_URL,
                     instance.getSuaInstancia(),
@@ -194,6 +230,12 @@ public class ZapiMessageService {
             log.info("✅ Imagem enviada com sucesso - MessageId: {}",
                     result != null ? result.get("messageId") : "N/A");
 
+            long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
+            rateLimits.put(instanceId, now + randomDelay);
+
+            log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
+                    instanceId, randomDelay / 1000);
+
             return result;
 
         } catch (Exception e) {
@@ -207,6 +249,17 @@ public class ZapiMessageService {
      */
     public Map<String, Object> sendVideo(WebInstance instance, String phone, String video) {
         try {
+
+            String instanceId = instance.getUser().getId();
+            long now = System.currentTimeMillis();
+
+            Long nextAllowedTime = rateLimits.getIfPresent(instanceId);
+            if (nextAllowedTime != null && now < nextAllowedTime) {
+                long secondsLeft = (nextAllowedTime - now) / 1000;
+                log.warn("⚠️ Instância {} bloqueada. Aguarde {}s.", instanceId, secondsLeft);
+                return Map.of("status", "error", "message", "Cooldown ativo. Aguarde o intervalo.");
+            }
+
             String url = String.format("%s/instances/%s/token/%s/send-video",
                     ZAPI_BASE_URL,
                     instance.getSuaInstancia(),
@@ -238,6 +291,12 @@ public class ZapiMessageService {
             Map<String, Object> result = response.getBody();
             log.info("✅ Vídeo enviado com sucesso - MessageId: {}",
                     result != null ? result.get("messageId") : "N/A");
+
+            long randomDelay = ThreadLocalRandom.current().nextLong(240_000, 420_001);
+            rateLimits.put(instanceId, now + randomDelay);
+
+            log.info("✅ Mensagem enviada. Instância {} travada por {} segundos.",
+                    instanceId, randomDelay / 1000);
 
             return result;
 
