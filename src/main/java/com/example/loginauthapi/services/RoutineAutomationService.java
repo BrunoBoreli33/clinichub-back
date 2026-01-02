@@ -13,6 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.*;
 import java.util.*;
 
+import static com.example.loginauthapi.entities.ChatRoutineStatus.PROCESSING;
+import static com.example.loginauthapi.entities.ChatRoutineStatus.SENT;
+
 // Serviço responsável por automatizar o envio de mensagens de rotina para clientes
 @Service
 @RequiredArgsConstructor
@@ -86,26 +89,49 @@ public class RoutineAutomationService {
             return;
         }
 
+        int updatedCount = chatRepository.updateStatusForRepescagem(
+                user.getId(),
+                REPESCAGEM_COLUMN,
+                ChatRoutineStatus.PENDING
+        );
+
+        log.info("Foram colocados {} chats na fila de repescagem.", updatedCount);
+
         // ✅ PASSO 1: Primeiro processa chats que JÁ ESTÃO em repescagem
         // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
-        List<Chat> repescagemChats = chatRepository.findByUserIdAndColumnAndNotGroup(user.getId(), REPESCAGEM_COLUMN).stream()
+        List<Chat> repescagemChats = chatRepository.findByUserIdAndColumnAndNotGroupAndStatusIsPending(user.getId(), REPESCAGEM_COLUMN)
+                .stream()
+                .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
 
         // Verifica cada chat em repescagem para enviar a próxima mensagem automática
         for (Chat chat : repescagemChats) {
+            chat.setStatus(PROCESSING);
+            chatRepository.saveAndFlush(chat);
             checkAndSendNextRoutineMessage(chat, user, routines);
         }
 
+        int updatedForRepescagemCount = chatRepository.updateStatusForInRepescagem(
+                user.getId(),
+                Arrays.asList("hot_lead", "inbox"),
+                ChatRoutineStatus.PENDING
+        );
+
+        log.info("Foram colocados {} chats na fila para repescagem.", updatedForRepescagemCount);
+
         // ✅ PASSO 2: Depois busca chats que PRECISAM ENTRAR em repescagem
         // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
-        List<Chat> monitoredChats = chatRepository.findByUserIdAndColumnIn(
+        List<Chat> monitoredChats = chatRepository.findByUserIdAndStatusIsPendingAndColumnIn(
                         user.getId(),
                         Arrays.asList("hot_lead", "inbox")
                 ).stream()
+                .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
 
         // Verifica cada chat para ver se é hora de mover para repescagem
         for (Chat chat : monitoredChats) {
+            chat.setStatus(PROCESSING);
+            chatRepository.saveAndFlush(chat);
             checkAndMoveToRepescagem(chat, user, firstRoutine, routines);
         }
     }
@@ -140,7 +166,6 @@ public class RoutineAutomationService {
         // *************************************************************************
         // FIM DA CORREÇÃO DE ATIVIDADE
         // *************************************************************************
-
 
         // A PARTIR DAQUI, SABEMOS QUE A ÚLTIMA MENSAGEM FOI ENVIADA PELO USUÁRIO (fromMe=true)
 
@@ -317,7 +342,7 @@ public class RoutineAutomationService {
             }
         }
 
-        if (state.getLastRoutineSent() >= routines.size() ) {
+        if (state.getLastRoutineSent() >= routines.size()) {
             // Verifica se passou tempo suficiente para mover para Lead Frio
             if (state.getLastAutomatedMessageSent() != null) {
                 // Busca a configuração da última rotina (rotina 7)
@@ -382,14 +407,14 @@ public class RoutineAutomationService {
             // então envia a próxima mensagem
             if (hoursSinceLastAutomated >= nextRoutine.getHoursDelay()) {
 
-            // 1. Caso exista um horário já programado:
+                // 1. Caso exista um horário já programado:
                 if (state.getScheduledSendTime() != null) {
                     if (now.isBefore(state.getScheduledSendTime())) {
                         return; // ainda não chegou o horário de enviar
                     }
                 }
 
-            // 2. Caso não seja horário comercial:
+                // 2. Caso não seja horário comercial:
                 if (!isBusinessHours(now)) {
                     LocalDateTime scheduled = nextBusinessWindow(now);
                     state.setScheduledSendTime(scheduled);
@@ -445,6 +470,7 @@ public class RoutineAutomationService {
     private void moveToLeadFrio(Chat chat, ChatRoutineState state, User user) {
         try {
             // Move o chat para a coluna de Lead Frio
+            chat.setStatus(SENT);
             chat.setColumn(LEAD_FRIO_COLUMN);
             chatRepository.save(chat);
 
@@ -643,26 +669,26 @@ public class RoutineAutomationService {
             log.info("📷 [CHAT: {}] Enviando {} foto(s)", chat.getId(), photos.size());
             for (Photo photo : photos) {
 
-                    try {
-                        photoService.saveOutgoingPhoto(
-                                chat.getId(),
-                                chat.getPhone(),
-                                photo.getImageUrl(),
-                                webInstance.getId(),
-                                null
-                        );
-                    } catch (DataIntegrityViolationException e) {
-                        log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
-                    }
-
-                    zapiMessageService.sendImage(
-                            webInstance,
+                try {
+                    photoService.saveOutgoingPhoto(
+                            chat.getId(),
                             chat.getPhone(),
                             photo.getImageUrl(),
-                            true
+                            webInstance.getId(),
+                            null
                     );
-
+                } catch (DataIntegrityViolationException e) {
+                    log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
                 }
+
+                zapiMessageService.sendImage(
+                        webInstance,
+                        chat.getPhone(),
+                        photo.getImageUrl(),
+                        true
+                );
+
+            }
         }
 
         // ===== PASSO 3: Enviar vídeos (se houver) =====
@@ -671,24 +697,24 @@ public class RoutineAutomationService {
             log.info("🎥 [CHAT: {}] Enviando {} vídeo(s)", chat.getId(), videos.size());
             for (Video video : videos) {
 
-                    try {
-                        videoService.saveOutgoingVideo(
-                                chat.getId(),
-                                chat.getPhone(),
-                                video.getVideoUrl(),
-                                webInstance.getId(),
-                                null
-                        );
-                    } catch (DataIntegrityViolationException e) {
-                        log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
-                    }
-
-                    zapiMessageService.sendVideo(
-                            webInstance,
+                try {
+                    videoService.saveOutgoingVideo(
+                            chat.getId(),
                             chat.getPhone(),
                             video.getVideoUrl(),
-                            true
+                            webInstance.getId(),
+                            null
                     );
+                } catch (DataIntegrityViolationException e) {
+                    log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
+                }
+
+                zapiMessageService.sendVideo(
+                        webInstance,
+                        chat.getPhone(),
+                        video.getVideoUrl(),
+                        true
+                );
 
             }
         }
