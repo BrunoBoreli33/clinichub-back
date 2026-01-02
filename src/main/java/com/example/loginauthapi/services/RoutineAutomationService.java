@@ -1,7 +1,5 @@
 package com.example.loginauthapi.services;
 
-import com.example.loginauthapi.dto.PhotoDTO;
-import com.example.loginauthapi.dto.VideoDTO;
 import com.example.loginauthapi.entities.*;
 import com.example.loginauthapi.repositories.*;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
@@ -182,12 +180,12 @@ public class RoutineAutomationService {
             int nextSequence = state.getLastRoutineSent() + 1;
 
             // Busca a rotina correspondente à próxima sequência
-            Optional<RoutineText> routineToSendOpt = routines.stream()
+            Optional<RoutineText> nextRoutineToSendOpt = routines.stream()
                     .filter(r -> r.getSequenceNumber() == nextSequence)
                     .findFirst();
 
             // ✅ TRATAMENTO: Se não existe a próxima rotina configurada, move para Lead Frio
-            if (routineToSendOpt.isEmpty()) {
+            if (nextRoutineToSendOpt.isEmpty()) {
                 log.warn("⚠️ [CHAT: {}] Não há rotina #{} configurada. Movendo para Lead Frio.", chat.getId(), nextSequence);
 
                 // Configura o estado mínimo necessário
@@ -201,7 +199,7 @@ public class RoutineAutomationService {
                 return;
             }
 
-            RoutineText routineToSend = routineToSendOpt.get();
+            RoutineText routineToSend = nextRoutineToSendOpt.get();
 
             // ✅ TRATAMENTO: Se o textContent da rotina está vazio/null, move para Lead Frio
             if (routineToSend.getTextContent() == null || routineToSend.getTextContent().trim().isEmpty()) {
@@ -263,14 +261,14 @@ public class RoutineAutomationService {
 
             LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
-// 1. Caso exista um horário já programado:
+            // 1. Caso exista um horário já programado:
             if (state.getScheduledSendTime() != null) {
                 if (now.isBefore(state.getScheduledSendTime())) {
                     return; // ainda não chegou o horário de enviar
                 }
             }
 
-// 2. Caso não seja horário comercial:
+            // 2. Caso não seja horário comercial:
             if (!isBusinessHours(now)) {
                 LocalDateTime scheduled = nextBusinessWindow(now);
                 state.setScheduledSendTime(scheduled);
@@ -279,15 +277,14 @@ public class RoutineAutomationService {
                 return;
             }
 
-// 3. Se chegou aqui → ENVIAR
+            // 3. Se chegou aqui → ENVIAR
             state.setScheduledSendTime(null); // limpa a fila
 
             // ✅ NOVO: Enviar texto, fotos e vídeos
             sendRoutineWithMedia(
                     chat,
                     webInstance,
-                    routineToSend,
-                    "Rotina #" + routineToSend.getSequenceNumber()
+                    routineToSend
             );
 
         } catch (Exception e) {
@@ -387,8 +384,6 @@ public class RoutineAutomationService {
             // então envia a próxima mensagem
             if (hoursSinceLastAutomated >= nextRoutine.getHoursDelay()) {
 
-
-
             // 1. Caso exista um horário já programado:
                 if (state.getScheduledSendTime() != null) {
                     if (now.isBefore(state.getScheduledSendTime())) {
@@ -431,38 +426,15 @@ public class RoutineAutomationService {
 
             WebInstance webInstance = webInstanceOpt.get();
 
-            state.setInRepescagem(true);
-
-            LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
-
-            // 1. Caso exista um horário já programado:
-            if (state.getScheduledSendTime() != null) {
-                if (now.isBefore(state.getScheduledSendTime())) {
-                    return; // ainda não chegou o horário de enviar
-                }
-            }
-
-            // 2. Caso não seja horário comercial:
-            if (!isBusinessHours(now)) {
-                LocalDateTime scheduled = nextBusinessWindow(now);
-                state.setScheduledSendTime(scheduled);
-                chatRoutineStateRepository.save(state);
-                log.info("⏳ Mensagem reagendada para {} (horário comercial)", scheduled);
-                return;
-            }
-
-            // 3. Se chegou aqui → ENVIAR
-            state.setScheduledSendTime(null); // limpa a fila
-
             // ✅ NOVO: Enviar texto, fotos e vídeos
             sendRoutineWithMedia(
                     chat,
                     webInstance,
-                    routine,
-                    "Rotina #" + routine.getSequenceNumber()
+                    routine
             );
 
             // ATUALIZAÇÃO DO TEMPO DE ENVIO APÓS O ENVIO
+            state.setInRepescagem(true);
             state.setLastAutomatedMessageSent(LocalDateTime.now(ZoneId.of("America/Sao_Paulo")));
             chatRoutineStateRepository.save(state);
         } catch (Exception e) {
@@ -650,8 +622,7 @@ public class RoutineAutomationService {
     private void sendRoutineWithMedia(
             Chat chat,
             WebInstance webInstance,
-            RoutineText routine,
-            String messagePrefix
+            RoutineText routine
     ) {
         String greeting = randomGreeting();
         String fallbackGreeting = randomFallbackGreeting();
@@ -723,6 +694,7 @@ public class RoutineAutomationService {
 
             }
         }
+
     }
 
 
