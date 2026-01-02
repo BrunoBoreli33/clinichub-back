@@ -8,7 +8,6 @@ import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -116,7 +115,6 @@ public class RoutineAutomationService {
     }
 
     // Verifica se um chat deve ser movido para repescagem e envia a primeira mensagem
-    @Async
     private void checkAndMoveToRepescagem(Chat chat, User user, RoutineText firstRoutine, List<RoutineText> routines) {
 
         // ✅ NOVO: Verifica se a repescagem já foi concluída anteriormente
@@ -298,7 +296,6 @@ public class RoutineAutomationService {
     }
 
     // Verifica e envia a próxima mensagem de rotina para um chat já em repescagem
-    @Async
     private void checkAndSendNextRoutineMessage(Chat chat, User user, List<RoutineText> routines) {
         // Busca o estado de rotina deste chat
         Optional<ChatRoutineState> stateOpt = chatRoutineStateRepository.findByChatId(chat.getId());
@@ -728,18 +725,20 @@ public class RoutineAutomationService {
         }
     }
 
+
     private static final List<String> GREETINGS = List.of(
             "Olá ",
             "Oi ",
             "Oii ",
             "Oiii ",
-            "Oie ",
+            "Oiê ",
             "Oiee ",
             "Oieeê "
     );
 
     private static final List<String> FALLBACK_GREETINGS = List.of(
             "Oii querid@",
+            "Oiii",
             "Olá! Espero que esteja bem",
             "Oiê! Como vai?"
     );
