@@ -1,12 +1,14 @@
 package com.example.loginauthapi.repositories;
 
 import com.example.loginauthapi.entities.Chat;
+import com.example.loginauthapi.entities.ChatRoutineStatus;
 import com.example.loginauthapi.entities.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -85,35 +87,40 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
     // ✅ NOVOS MÉTODOS PARA ROTINAS AUTOMÁTICAS
     // ============================================
 
-    /**
-     * Buscar chats do usuário em colunas específicas
-     * Usado para monitorar "Lead Quente" e "Atendimento Inicial"
-     *
-     * IMPORTANTE: Como Chat não tem userId direto, mas sim webInstance.user.id,
-     * precisamos usar query JPQL customizada
-     */
-    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column IN :columns")
-    List<Chat> findByUserIdAndColumnIn(@Param("userId") String userId, @Param("columns") List<String> columns);
+    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.status = 'PENDING' AND c.column IN :columns")
+    List<Chat> findByUserIdAndStatusIsPendingAndColumnIn(@Param("userId") String userId, @Param("columns") List<String> columns);
 
-    /**
-     * Buscar chats do usuário em uma coluna específica
-     * Usado para buscar chats em "Repescagem"
-     *
-     * IMPORTANTE: Usa webInstance.user.id para relacionamento correto
-     */
-    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column = :column")
-    List<Chat> findByUserIdAndColumn(@Param("userId") String userId, @Param("column") String column);
+    @Modifying
+    @Transactional
+    @Query("UPDATE Chat c SET c.status = :newStatus " +
+            "WHERE c.webInstance.user.id = :userId " +
+            "AND c.column = :column " +
+            "AND c.isGroup = false " +
+            "AND c.status = 'NONE'")
+    int updateStatusForRepescagem(
+            @Param("userId") String userId,
+            @Param("column") String column,
+            @Param("newStatus") ChatRoutineStatus newStatus
+    );
 
-    /**
-     * Buscar chat por id, coluna e nao é grupo
-     * Usado para filtrar chats para repescagem
-     */
-    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column = :column AND c.isGroup = false")
-    List<Chat> findByUserIdAndColumnAndNotGroup(
+    @Modifying
+    @Transactional
+    @Query("UPDATE Chat c SET c.status = :newStatus " +
+            "WHERE c.webInstance.user.id = :userId " +
+            "AND c.column IN :columns " +
+            "AND c.isGroup = false " +
+            "AND c.status = 'NONE'")
+    int updateStatusForInRepescagem(
+            @Param("userId") String userId,
+            @Param("columns") List<String> columns,
+            @Param("newStatus") ChatRoutineStatus newStatus
+    );
+
+    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column = :column AND c.isGroup = false and c.status = 'PENDING' ")
+    List<Chat> findByUserIdAndColumnAndNotGroupAndStatusIsPending(
             @Param("userId") String userId,
             @Param("column") String column
     );
-
 
     /**
      * Buscar chat por phone e webInstanceId
@@ -134,23 +141,6 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
      * @return Optional contendo o chat se encontrado
      */
     Optional<Chat> findByWebInstanceIdAndChatLid(String webInstanceId, String chatLid);
-
-    /**
-     * Buscar chat por chatLid OU phone
-     * Usado para encontrar chat independente se o número foi revelado ou não
-     * Prioriza busca por chatLid, mas também verifica phone
-     *
-     * @param webInstanceId ID da instância do WhatsApp
-     * @param chatLid Identificador LID do WhatsApp
-     * @param phone Número de telefone
-     * @return Optional contendo o chat se encontrado
-     */
-    @Query("SELECT c FROM Chat c WHERE c.webInstance.id = :webInstanceId AND (c.chatLid = :chatLid OR c.phone = :phone)")
-    Optional<Chat> findByWebInstanceIdAndChatLidOrPhone(
-            @Param("webInstanceId") String webInstanceId,
-            @Param("chatLid") String chatLid,
-            @Param("phone") String phone
-    );
 
     // ============================================
     // ✅ NOVOS MÉTODOS PARA DISPARO DE CAMPANHA

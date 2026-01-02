@@ -89,6 +89,10 @@ public class Chat {
     @Column(name = "is_trustworthy", nullable = false)
     private Boolean isTrustworthy = false;
 
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    private ChatRoutineStatus status = ChatRoutineStatus.NONE;
+
     // ✅ ALTERADO: De @OneToOne para @OneToMany
     @OneToMany(mappedBy = "chat", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Task> tasks = new ArrayList<>();

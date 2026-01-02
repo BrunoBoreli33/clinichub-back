@@ -1,20 +1,20 @@
 package com.example.loginauthapi.services;
 
-import com.example.loginauthapi.dto.PhotoDTO;
-import com.example.loginauthapi.dto.VideoDTO;
 import com.example.loginauthapi.entities.*;
 import com.example.loginauthapi.repositories.*;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
 import java.util.*;
+
+import static com.example.loginauthapi.entities.ChatRoutineStatus.PROCESSING;
+import static com.example.loginauthapi.entities.ChatRoutineStatus.SENT;
 
 // Serviço responsável por automatizar o envio de mensagens de rotina para clientes
 @Service
@@ -89,34 +89,54 @@ public class RoutineAutomationService {
             return;
         }
 
+        int updatedCount = chatRepository.updateStatusForRepescagem(
+                user.getId(),
+                REPESCAGEM_COLUMN,
+                ChatRoutineStatus.PENDING
+        );
+
+        log.info("Foram colocados {} chats na fila de repescagem.", updatedCount);
+
         // ✅ PASSO 1: Primeiro processa chats que JÁ ESTÃO em repescagem
         // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
-        List<Chat> repescagemChats = chatRepository.findByUserIdAndColumnAndNotGroup(user.getId(), REPESCAGEM_COLUMN).stream()
-                //.filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
+        List<Chat> repescagemChats = chatRepository.findByUserIdAndColumnAndNotGroupAndStatusIsPending(user.getId(), REPESCAGEM_COLUMN)
+                .stream()
+                .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
 
         // Verifica cada chat em repescagem para enviar a próxima mensagem automática
         for (Chat chat : repescagemChats) {
+            chat.setStatus(PROCESSING);
+            chatRepository.saveAndFlush(chat);
             checkAndSendNextRoutineMessage(chat, user, routines);
         }
 
+        int updatedForRepescagemCount = chatRepository.updateStatusForInRepescagem(
+                user.getId(),
+                Arrays.asList("hot_lead", "inbox"),
+                ChatRoutineStatus.PENDING
+        );
+
+        log.info("Foram colocados {} chats na fila para repescagem.", updatedForRepescagemCount);
+
         // ✅ PASSO 2: Depois busca chats que PRECISAM ENTRAR em repescagem
         // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
-        List<Chat> monitoredChats = chatRepository.findByUserIdAndColumnIn(
+        List<Chat> monitoredChats = chatRepository.findByUserIdAndStatusIsPendingAndColumnIn(
                         user.getId(),
                         Arrays.asList("hot_lead", "inbox")
                 ).stream()
-                //.filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
+                .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
 
         // Verifica cada chat para ver se é hora de mover para repescagem
         for (Chat chat : monitoredChats) {
+            chat.setStatus(PROCESSING);
+            chatRepository.saveAndFlush(chat);
             checkAndMoveToRepescagem(chat, user, firstRoutine, routines);
         }
     }
 
     // Verifica se um chat deve ser movido para repescagem e envia a primeira mensagem
-    @Async
     private void checkAndMoveToRepescagem(Chat chat, User user, RoutineText firstRoutine, List<RoutineText> routines) {
 
         // ✅ NOVO: Verifica se a repescagem já foi concluída anteriormente
@@ -146,7 +166,6 @@ public class RoutineAutomationService {
         // *************************************************************************
         // FIM DA CORREÇÃO DE ATIVIDADE
         // *************************************************************************
-
 
         // A PARTIR DAQUI, SABEMOS QUE A ÚLTIMA MENSAGEM FOI ENVIADA PELO USUÁRIO (fromMe=true)
 
@@ -184,12 +203,12 @@ public class RoutineAutomationService {
             int nextSequence = state.getLastRoutineSent() + 1;
 
             // Busca a rotina correspondente à próxima sequência
-            Optional<RoutineText> routineToSendOpt = routines.stream()
+            Optional<RoutineText> nextRoutineToSendOpt = routines.stream()
                     .filter(r -> r.getSequenceNumber() == nextSequence)
                     .findFirst();
 
             // ✅ TRATAMENTO: Se não existe a próxima rotina configurada, move para Lead Frio
-            if (routineToSendOpt.isEmpty()) {
+            if (nextRoutineToSendOpt.isEmpty()) {
                 log.warn("⚠️ [CHAT: {}] Não há rotina #{} configurada. Movendo para Lead Frio.", chat.getId(), nextSequence);
 
                 // Configura o estado mínimo necessário
@@ -203,7 +222,7 @@ public class RoutineAutomationService {
                 return;
             }
 
-            RoutineText routineToSend = routineToSendOpt.get();
+            RoutineText routineToSend = nextRoutineToSendOpt.get();
 
             // ✅ TRATAMENTO: Se o textContent da rotina está vazio/null, move para Lead Frio
             if (routineToSend.getTextContent() == null || routineToSend.getTextContent().trim().isEmpty()) {
@@ -265,14 +284,14 @@ public class RoutineAutomationService {
 
             LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
 
-// 1. Caso exista um horário já programado:
+            // 1. Caso exista um horário já programado:
             if (state.getScheduledSendTime() != null) {
                 if (now.isBefore(state.getScheduledSendTime())) {
                     return; // ainda não chegou o horário de enviar
                 }
             }
 
-// 2. Caso não seja horário comercial:
+            // 2. Caso não seja horário comercial:
             if (!isBusinessHours(now)) {
                 LocalDateTime scheduled = nextBusinessWindow(now);
                 state.setScheduledSendTime(scheduled);
@@ -281,15 +300,14 @@ public class RoutineAutomationService {
                 return;
             }
 
-// 3. Se chegou aqui → ENVIAR
+            // 3. Se chegou aqui → ENVIAR
             state.setScheduledSendTime(null); // limpa a fila
 
             // ✅ NOVO: Enviar texto, fotos e vídeos
             sendRoutineWithMedia(
                     chat,
                     webInstance,
-                    routineToSend,
-                    "Rotina #" + routineToSend.getSequenceNumber()
+                    routineToSend
             );
 
         } catch (Exception e) {
@@ -298,7 +316,6 @@ public class RoutineAutomationService {
     }
 
     // Verifica e envia a próxima mensagem de rotina para um chat já em repescagem
-    @Async
     private void checkAndSendNextRoutineMessage(Chat chat, User user, List<RoutineText> routines) {
         // Busca o estado de rotina deste chat
         Optional<ChatRoutineState> stateOpt = chatRoutineStateRepository.findByChatId(chat.getId());
@@ -325,7 +342,7 @@ public class RoutineAutomationService {
             }
         }
 
-        if (state.getLastRoutineSent() >= routines.size() ) {
+        if (state.getLastRoutineSent() >= routines.size()) {
             // Verifica se passou tempo suficiente para mover para Lead Frio
             if (state.getLastAutomatedMessageSent() != null) {
                 // Busca a configuração da última rotina (rotina 7)
@@ -390,16 +407,14 @@ public class RoutineAutomationService {
             // então envia a próxima mensagem
             if (hoursSinceLastAutomated >= nextRoutine.getHoursDelay()) {
 
-
-
-            // 1. Caso exista um horário já programado:
+                // 1. Caso exista um horário já programado:
                 if (state.getScheduledSendTime() != null) {
                     if (now.isBefore(state.getScheduledSendTime())) {
                         return; // ainda não chegou o horário de enviar
                     }
                 }
 
-            // 2. Caso não seja horário comercial:
+                // 2. Caso não seja horário comercial:
                 if (!isBusinessHours(now)) {
                     LocalDateTime scheduled = nextBusinessWindow(now);
                     state.setScheduledSendTime(scheduled);
@@ -434,38 +449,15 @@ public class RoutineAutomationService {
 
             WebInstance webInstance = webInstanceOpt.get();
 
-            state.setInRepescagem(true);
-
-            LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
-
-            // 1. Caso exista um horário já programado:
-            if (state.getScheduledSendTime() != null) {
-                if (now.isBefore(state.getScheduledSendTime())) {
-                    return; // ainda não chegou o horário de enviar
-                }
-            }
-
-            // 2. Caso não seja horário comercial:
-            if (!isBusinessHours(now)) {
-                LocalDateTime scheduled = nextBusinessWindow(now);
-                state.setScheduledSendTime(scheduled);
-                chatRoutineStateRepository.save(state);
-                log.info("⏳ Mensagem reagendada para {} (horário comercial)", scheduled);
-                return;
-            }
-
-            // 3. Se chegou aqui → ENVIAR
-            state.setScheduledSendTime(null); // limpa a fila
-
             // ✅ NOVO: Enviar texto, fotos e vídeos
             sendRoutineWithMedia(
                     chat,
                     webInstance,
-                    routine,
-                    "Rotina #" + routine.getSequenceNumber()
+                    routine
             );
 
             // ATUALIZAÇÃO DO TEMPO DE ENVIO APÓS O ENVIO
+            state.setInRepescagem(true);
             state.setLastAutomatedMessageSent(LocalDateTime.now(ZoneId.of("America/Sao_Paulo")));
             chatRoutineStateRepository.save(state);
         } catch (Exception e) {
@@ -478,6 +470,7 @@ public class RoutineAutomationService {
     private void moveToLeadFrio(Chat chat, ChatRoutineState state, User user) {
         try {
             // Move o chat para a coluna de Lead Frio
+            chat.setStatus(SENT);
             chat.setColumn(LEAD_FRIO_COLUMN);
             chatRepository.save(chat);
 
@@ -653,8 +646,7 @@ public class RoutineAutomationService {
     private void sendRoutineWithMedia(
             Chat chat,
             WebInstance webInstance,
-            RoutineText routine,
-            String messagePrefix
+            RoutineText routine
     ) {
         String greeting = randomGreeting();
         String fallbackGreeting = randomFallbackGreeting();
@@ -677,26 +669,26 @@ public class RoutineAutomationService {
             log.info("📷 [CHAT: {}] Enviando {} foto(s)", chat.getId(), photos.size());
             for (Photo photo : photos) {
 
-                    try {
-                        photoService.saveOutgoingPhoto(
-                                chat.getId(),
-                                chat.getPhone(),
-                                photo.getImageUrl(),
-                                webInstance.getId(),
-                                null
-                        );
-                    } catch (DataIntegrityViolationException e) {
-                        log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
-                    }
-
-                    zapiMessageService.sendImage(
-                            webInstance,
+                try {
+                    photoService.saveOutgoingPhoto(
+                            chat.getId(),
                             chat.getPhone(),
                             photo.getImageUrl(),
-                            true
+                            webInstance.getId(),
+                            null
                     );
-
+                } catch (DataIntegrityViolationException e) {
+                    log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
                 }
+
+                zapiMessageService.sendImage(
+                        webInstance,
+                        chat.getPhone(),
+                        photo.getImageUrl(),
+                        true
+                );
+
+            }
         }
 
         // ===== PASSO 3: Enviar vídeos (se houver) =====
@@ -705,41 +697,44 @@ public class RoutineAutomationService {
             log.info("🎥 [CHAT: {}] Enviando {} vídeo(s)", chat.getId(), videos.size());
             for (Video video : videos) {
 
-                    try {
-                        videoService.saveOutgoingVideo(
-                                chat.getId(),
-                                chat.getPhone(),
-                                video.getVideoUrl(),
-                                webInstance.getId(),
-                                null
-                        );
-                    } catch (DataIntegrityViolationException e) {
-                        log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
-                    }
-
-                    zapiMessageService.sendVideo(
-                            webInstance,
+                try {
+                    videoService.saveOutgoingVideo(
+                            chat.getId(),
                             chat.getPhone(),
                             video.getVideoUrl(),
-                            true
+                            webInstance.getId(),
+                            null
                     );
+                } catch (DataIntegrityViolationException e) {
+                    log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
+                }
+
+                zapiMessageService.sendVideo(
+                        webInstance,
+                        chat.getPhone(),
+                        video.getVideoUrl(),
+                        true
+                );
 
             }
         }
+
     }
+
 
     private static final List<String> GREETINGS = List.of(
             "Olá ",
             "Oi ",
             "Oii ",
             "Oiii ",
-            "Oie ",
+            "Oiê ",
             "Oiee ",
             "Oieeê "
     );
 
     private static final List<String> FALLBACK_GREETINGS = List.of(
             "Oii querid@",
+            "Oiii",
             "Olá! Espero que esteja bem",
             "Oiê! Como vai?"
     );
