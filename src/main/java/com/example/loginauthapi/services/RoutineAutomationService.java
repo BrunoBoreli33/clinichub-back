@@ -13,8 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.*;
 import java.util.*;
 
-import static com.example.loginauthapi.entities.ChatRoutineStatus.PROCESSING;
-import static com.example.loginauthapi.entities.ChatRoutineStatus.SENT;
+import static com.example.loginauthapi.entities.ChatRoutineStatus.*;
 
 // Serviço responsável por automatizar o envio de mensagens de rotina para clientes
 @Service
@@ -310,6 +309,9 @@ public class RoutineAutomationService {
                     routineToSend
             );
 
+            chat.setStatus(PENDING);
+            chatRepository.saveAndFlush(chat);
+
         } catch (Exception e) {
             log.error("❌ [CHAT: {}] Erro ao mover para repescagem", chat.getId(), e);
         }
@@ -429,6 +431,9 @@ public class RoutineAutomationService {
                 // Incrementa e salva o estado DEPOIS do envio do Z-API
                 state.setLastRoutineSent(nextSequence);
                 chatRoutineStateRepository.save(state);
+
+                chat.setStatus(PENDING);
+                chatRepository.saveAndFlush(chat);
             }
         }
     }
