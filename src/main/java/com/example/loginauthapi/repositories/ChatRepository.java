@@ -117,6 +117,15 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
             @Param("newStatus") ChatRoutineStatus newStatus
     );
 
+    @Modifying
+    @Transactional
+    @Query("UPDATE Chat c SET c.status = :status " +
+            "WHERE c.id.id = :chatId ")
+    void updateStatusByChatId(
+            @Param("status") ChatRoutineStatus status,
+            @Param("chatId") String chatId
+    );
+
     @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column = :column AND c.isGroup = false and c.status = 'PENDING' ORDER BY c.lastMessageTime ASC")
     List<Chat> findByUserIdAndColumnAndNotGroupAndStatusIsPending(
             @Param("userId") String userId,
