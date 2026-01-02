@@ -3,6 +3,7 @@ package com.example.loginauthapi.repositories;
 import com.example.loginauthapi.entities.Chat;
 import com.example.loginauthapi.entities.ChatRoutineStatus;
 import com.example.loginauthapi.entities.User;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -87,8 +88,8 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
     // ✅ NOVOS MÉTODOS PARA ROTINAS AUTOMÁTICAS
     // ============================================
 
-    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.status = 'PENDING' AND c.column IN :columns")
-    List<Chat> findByUserIdAndStatusIsPendingAndColumnIn(@Param("userId") String userId, @Param("columns") List<String> columns);
+    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.status = 'PENDING' AND c.column IN :columns ORDER BY c.lastMessageTime ASC ")
+    List<Chat> findByUserIdAndStatusIsPendingAndColumnIn(@Param("userId") String userId, @Param("columns") List<String> columns, Pageable pageable);
 
     @Modifying
     @Transactional
@@ -116,10 +117,11 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
             @Param("newStatus") ChatRoutineStatus newStatus
     );
 
-    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column = :column AND c.isGroup = false and c.status = 'PENDING' ")
+    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column = :column AND c.isGroup = false and c.status = 'PENDING' ORDER BY c.lastMessageTime ASC")
     List<Chat> findByUserIdAndColumnAndNotGroupAndStatusIsPending(
             @Param("userId") String userId,
-            @Param("column") String column
+            @Param("column") String column,
+            Pageable pageable
     );
 
     /**

@@ -5,8 +5,13 @@ import com.example.loginauthapi.repositories.*;
 import com.example.loginauthapi.services.zapi.ZapiMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,10 +21,10 @@ import java.util.*;
 import static com.example.loginauthapi.entities.ChatRoutineStatus.*;
 
 // Serviço responsável por automatizar o envio de mensagens de rotina para clientes
-@Service
+@Component
 @RequiredArgsConstructor
 @Slf4j
-public class RoutineAutomationService {
+public class RoutineAutomationService implements CommandLineRunner {
 
     // Repositórios para acessar dados do banco
     private final ChatRepository chatRepository;
@@ -28,6 +33,7 @@ public class RoutineAutomationService {
     private final ChatRoutineStateRepository chatRoutineStateRepository;
     private final UserRepository userRepository;
     private final WebInstanceRepository webInstanceRepository;
+    private final TaskScheduler taskScheduler;
 
     // Serviço para enviar mensagens via WhatsApp (Z-API)
     private final ZapiMessageService zapiMessageService;
@@ -45,10 +51,17 @@ public class RoutineAutomationService {
     private static final String REPESCAGEM_COLUMN = "followup"; // Coluna de acompanhamento automático
     private static final String LEAD_FRIO_COLUMN = "cold_lead"; // Coluna de leads frios (sem resposta)
 
+    /*
     // Método executado automaticamente a cada minuto
-    @Scheduled(cron = "0 * 8-20 * * MON-FRI", zone = "America/Sao_Paulo")
+    @Scheduled(cron = "0 * 8-19 * * MON-FRI", zone = "America/Sao_Paulo")
     public void processRoutineAutomation() {
         log.info("🤖 Iniciando processamento de rotinas automáticas");
+
+
+        if (isFeriado(LocalDate.now())) {
+            log.info("Processamento abortado: Hoje é feriado.");
+            return;
+        }
 
         try {
             // Busca todos os usuários cadastrados no sistema
@@ -63,6 +76,48 @@ public class RoutineAutomationService {
         } catch (Exception e) {
             // Registra qualquer erro que ocorra durante o processamento
             log.error("❌ Erro ao processar rotinas automáticas", e);
+        }
+    }
+
+     */
+
+    private void scheduleNext() {
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
+        long delay;
+
+        if (isHorarioComercial(now) && !isFeriado(now.toLocalDate())) {
+            // Intervalo aleatório entre 2 e 5 minutos (120.000ms a 300.000ms)
+            delay = 120000 + (long) (Math.random() * 180000);
+            log.info("⏱️ Próxima execução agendada para daqui a {} segundos", delay / 1000);
+        } else {
+            // Se for noite ou feriado, calcula o tempo até as 08:00 do próximo dia útil
+            delay = calcularMillisAteProximoDiaUtil(now);
+            log.info("😴 Fora do horário comercial ou feriado. Sistema dormindo por {} minutos", delay / 60000);
+        }
+
+        taskScheduler.schedule(() -> {
+            try {
+                // Double check para garantir que não processe fora do horário por erro de cálculo
+                if (isHorarioComercial(LocalDateTime.now(ZoneId.of("America/Sao_Paulo"))) && !isFeriado(LocalDate.now())) {
+                    executeProcess();
+                }
+            } finally {
+                scheduleNext(); // Reagendamento recursivo (a corrente nunca quebra)
+            }
+        }, Instant.now().plusMillis(delay));
+    }
+
+
+    private void executeProcess() {
+        log.info("🤖 Iniciando processamento de rotinas automáticas");
+        try {
+            List<User> users = userRepository.findAll();
+            for (User user : users) {
+                processUserRoutines(user);
+            }
+            log.info("✅ Lote de rotinas processado com sucesso");
+        } catch (Exception e) {
+            log.error("❌ Erro durante o processamento de rotinas", e);
         }
     }
 
@@ -98,7 +153,8 @@ public class RoutineAutomationService {
 
         // ✅ PASSO 1: Primeiro processa chats que JÁ ESTÃO em repescagem
         // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
-        List<Chat> repescagemChats = chatRepository.findByUserIdAndColumnAndNotGroupAndStatusIsPending(user.getId(), REPESCAGEM_COLUMN)
+        Pageable limit = PageRequest.of(0, 2);
+        List<Chat> repescagemChats = chatRepository.findByUserIdAndColumnAndNotGroupAndStatusIsPending(user.getId(), REPESCAGEM_COLUMN, limit)
                 .stream()
                 .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
@@ -122,7 +178,8 @@ public class RoutineAutomationService {
         // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
         List<Chat> monitoredChats = chatRepository.findByUserIdAndStatusIsPendingAndColumnIn(
                         user.getId(),
-                        Arrays.asList("hot_lead", "inbox")
+                        Arrays.asList("hot_lead", "inbox"),
+                        limit
                 ).stream()
                 .filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
@@ -754,4 +811,52 @@ public class RoutineAutomationService {
         return FALLBACK_GREETINGS.get(RANDOM.nextInt(FALLBACK_GREETINGS.size()));
     }
 
+    private boolean isFeriado(LocalDate date) {
+        List<MonthDay> feriadosFixos = List.of(
+                MonthDay.of(1, 1),   // Ano Novo
+                MonthDay.of(2, 16),  // Carnaval
+                MonthDay.of(2, 17),  // Carnaval
+                MonthDay.of(2, 18),  // Carnaval
+                MonthDay.of(4, 3),   // Paixao de Cristo
+                MonthDay.of(4, 21),  // Tiradentes
+                MonthDay.of(5, 1),   // Dia do Trabalho
+                MonthDay.of(6, 4),   // Corpus Christ
+                MonthDay.of(9, 7),   // Independência
+                MonthDay.of(10, 12), // Padroeira
+                MonthDay.of(11, 2),  // Finados
+                MonthDay.of(11, 15), // República
+                MonthDay.of(11, 20), // CN
+                MonthDay.of(12, 25)  // Natal
+        );
+
+        return feriadosFixos.contains(MonthDay.from(date));
+    }
+
+    @Override
+    public void run(String... args) throws Exception {
+        log.info("🚀 Iniciando Motor de Automação Dinâmica");
+        scheduleNext();
+    }
+
+    private boolean isHorarioComercial(LocalDateTime now) {
+        int hour = now.getHour();
+        DayOfWeek day = now.getDayOfWeek();
+        return hour >= 8 && hour < 20 && day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY;
+    }
+
+    private long calcularMillisAteProximoDiaUtil(LocalDateTime now) {
+        LocalDateTime nextRun = now.withHour(8).withMinute(0).withSecond(0).withNano(0);
+
+        // Se já passou das 08:00 de hoje, agenda para amanhã
+        if (now.getHour() >= 20 || (now.getHour() < 8)) {
+            if (now.getHour() >= 20) nextRun = nextRun.plusDays(1);
+        }
+
+        // Se cair no fim de semana, pula para segunda
+        while (nextRun.getDayOfWeek() == DayOfWeek.SATURDAY || nextRun.getDayOfWeek() == DayOfWeek.SUNDAY || isFeriado(nextRun.toLocalDate())) {
+            nextRun = nextRun.plusDays(1);
+        }
+
+        return Duration.between(now, nextRun).toMillis();
+    }
 }
