@@ -629,6 +629,9 @@ public class RoutineAutomationService implements CommandLineRunner {
                 state.setRepescagemCompleted(false);
                 chatRoutineStateRepository.save(state);
 
+                chat.setStatus(NONE);
+                chatRepository.saveAndFlush(chat);
+
                 log.info("✅ [CHAT: {}] Estado de rotina resetado (incluindo flag repescagemCompleted)", chatId);
 
                 // ✅ NOVA LÓGICA: Se estava em Repescagem, remove da coluna
