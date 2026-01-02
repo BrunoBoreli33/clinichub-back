@@ -72,6 +72,54 @@ public class ZapiMessageService {
         }
     }
 
+    public  Map<String, Object> sendTextMessageWithRetry(WebInstance instance, String phone, String message, boolean isAutomatedRoutine) {
+
+        int delayToSend = 1;
+
+        if (isAutomatedRoutine) {
+            delayToSend = ThreadLocalRandom.current().nextInt(1, 5);
+        }
+
+        try {
+            String url = String.format("%s/instances/%s/token/%s/send-text",
+                    ZAPI_BASE_URL,
+                    instance.getSuaInstancia(),
+                    instance.getSeuToken());
+
+            log.info("📨 Enviando mensagem para: {}", phone);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Client-Token", instance.getClientToken());
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+            Map<String, Object> body = Map.of(
+                    "phone", phone,
+                    "message", message,
+                    "delayTyping" , delayToSend,
+                    "delayMessage" , delayToSend
+            );
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+            var response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    Map.class
+            );
+
+            var result = response.getBody();
+            log.info("✅ Mensagem enviada com sucesso - MessageId: {}",
+                    result != null ? result.get("messageId") : "N/A");
+            return result;
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar mensagem", e);
+            throw new RuntimeException("Erro ao enviar mensagem via Z-API: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * ✅ NOVO: Enviar mensagem de texto com reply via Z-API
      */
@@ -208,6 +256,55 @@ public class ZapiMessageService {
         }
     }
 
+    public Map<String, Object> sendImageWithRetry(WebInstance instance, String phone, String image, boolean isAutomatedRoutine) {
+        try {
+
+            int delayToSend = 1;
+
+            if (isAutomatedRoutine) {
+                delayToSend = ThreadLocalRandom.current().nextInt(1, 5);
+            }
+
+            String url = String.format("%s/instances/%s/token/%s/send-image",
+                    ZAPI_BASE_URL,
+                    instance.getSuaInstancia(),
+                    instance.getSeuToken());
+
+            log.info("📷 Enviando imagem para: {}", phone);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Client-Token", instance.getClientToken());
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("phone", phone);
+            body.put("image", image);
+            body.put("delayTyping" , delayToSend);
+            body.put("delayMessage" , delayToSend);
+            body.put("viewOnce", false);
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    Map.class
+            );
+
+            Map<String, Object> result = response.getBody();
+            log.info("✅ Imagem enviada com sucesso - MessageId: {}",
+                    result != null ? result.get("messageId") : "N/A");
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar imagem", e);
+            throw new RuntimeException("Erro ao enviar imagem via Z-API: " + e.getMessage(), e);
+        }
+    }
+
 
     public void sendVideo(WebInstance instance, String phone, String video, boolean isAutomatedRoutine) {
         try {
@@ -249,6 +346,55 @@ public class ZapiMessageService {
             Map<String, Object> result = response.getBody();
             log.info("✅ Vídeo enviado com sucesso - MessageId: {}",
                     result != null ? result.get("messageId") : "N/A");
+
+        } catch (Exception e) {
+            log.error("❌ Erro ao enviar vídeo", e);
+            throw new RuntimeException("Erro ao enviar vídeo via Z-API: " + e.getMessage(), e);
+        }
+    }
+
+    public Map<String, Object> sendVideoWithRetry(WebInstance instance, String phone, String video, boolean isAutomatedRoutine) {
+        try {
+
+            int delayToSend = 1;
+
+            if (isAutomatedRoutine) {
+                delayToSend = ThreadLocalRandom.current().nextInt(1, 5);
+            }
+
+            String url = String.format("%s/instances/%s/token/%s/send-video",
+                    ZAPI_BASE_URL,
+                    instance.getSuaInstancia(),
+                    instance.getSeuToken());
+
+            log.info("🎥 Enviando vídeo para: {}", phone);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Client-Token", instance.getClientToken());
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("phone", phone);
+            body.put("video", video);
+            body.put("delayTyping" , delayToSend);
+            body.put("delayMessage" , delayToSend);
+            body.put("viewOnce", false);
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    Map.class
+            );
+
+            Map<String, Object> result = response.getBody();
+            log.info("✅ Vídeo enviado com sucesso - MessageId: {}",
+                    result != null ? result.get("messageId") : "N/A");
+
+            return result;
 
         } catch (Exception e) {
             log.error("❌ Erro ao enviar vídeo", e);
