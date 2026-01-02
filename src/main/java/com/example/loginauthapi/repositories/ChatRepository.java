@@ -120,7 +120,7 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
     @Modifying
     @Transactional
     @Query("UPDATE Chat c SET c.status = :status " +
-            "WHERE c.id.id = :chatId ")
+            "WHERE c.id = :chatId ")
     void updateStatusByChatId(
             @Param("status") ChatRoutineStatus status,
             @Param("chatId") String chatId
