@@ -89,7 +89,6 @@ public class RoutineAutomationService {
         // ✅ PASSO 1: Primeiro processa chats que JÁ ESTÃO em repescagem
         // FILTRO APLICADO: Processa apenas chats com activeInZapi = true
         List<Chat> repescagemChats = chatRepository.findByUserIdAndColumnAndNotGroup(user.getId(), REPESCAGEM_COLUMN).stream()
-                //.filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
 
         // Verifica cada chat em repescagem para enviar a próxima mensagem automática
@@ -103,7 +102,6 @@ public class RoutineAutomationService {
                         user.getId(),
                         Arrays.asList("hot_lead", "inbox")
                 ).stream()
-                //.filter(chat -> Boolean.TRUE.equals(chat.getActiveInZapi()))
                 .toList();
 
         // Verifica cada chat para ver se é hora de mover para repescagem
