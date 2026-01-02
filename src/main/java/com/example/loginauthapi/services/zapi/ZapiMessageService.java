@@ -30,7 +30,7 @@ public class ZapiMessageService {
         int delayToSend = 1;
 
         if (isAutomatedRoutine) {
-            delayToSend = ThreadLocalRandom.current().nextInt(1, 5);
+            delayToSend = ThreadLocalRandom.current().nextInt(10, 15);
         }
 
         try {
@@ -77,7 +77,7 @@ public class ZapiMessageService {
         int delayToSend = 1;
 
         if (isAutomatedRoutine) {
-            delayToSend = ThreadLocalRandom.current().nextInt(1, 5);
+            delayToSend = ThreadLocalRandom.current().nextInt(10, 15);
         }
 
         try {
@@ -215,7 +215,7 @@ public class ZapiMessageService {
             int delayToSend = 1;
 
             if (isAutomatedRoutine) {
-                delayToSend = ThreadLocalRandom.current().nextInt(1, 5);
+                delayToSend = ThreadLocalRandom.current().nextInt(10, 15);
             }
 
             String url = String.format("%s/instances/%s/token/%s/send-image",
@@ -262,7 +262,7 @@ public class ZapiMessageService {
             int delayToSend = 1;
 
             if (isAutomatedRoutine) {
-                delayToSend = ThreadLocalRandom.current().nextInt(1, 5);
+                delayToSend = ThreadLocalRandom.current().nextInt(10, 15);
             }
 
             String url = String.format("%s/instances/%s/token/%s/send-image",
@@ -312,7 +312,7 @@ public class ZapiMessageService {
             int delayToSend = 1;
 
             if (isAutomatedRoutine) {
-                delayToSend = ThreadLocalRandom.current().nextInt(1, 5);
+                delayToSend = ThreadLocalRandom.current().nextInt(10, 15);
             }
 
             String url = String.format("%s/instances/%s/token/%s/send-video",
@@ -359,7 +359,7 @@ public class ZapiMessageService {
             int delayToSend = 1;
 
             if (isAutomatedRoutine) {
-                delayToSend = ThreadLocalRandom.current().nextInt(1, 5);
+                delayToSend = ThreadLocalRandom.current().nextInt(10, 15);
             }
 
             String url = String.format("%s/instances/%s/token/%s/send-video",
