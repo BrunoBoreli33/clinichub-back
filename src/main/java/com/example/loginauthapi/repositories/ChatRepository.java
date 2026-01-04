@@ -88,7 +88,7 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
     // ✅ NOVOS MÉTODOS PARA ROTINAS AUTOMÁTICAS
     // ============================================
 
-    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.status = 'PENDING' AND c.column IN :columns ORDER BY c.lastMessageTime ASC ")
+    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.status IN  ('PENDING', 'PROCESSING') AND c.column IN :columns ORDER BY c.lastMessageTime ASC ")
     List<Chat> findByUserIdAndStatusIsPendingAndColumnIn(@Param("userId") String userId, @Param("columns") List<String> columns, Pageable pageable);
 
     @Modifying
@@ -126,7 +126,7 @@ public interface ChatRepository extends JpaRepository<Chat, String> {
             @Param("chatId") String chatId
     );
 
-    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column = :column AND c.isGroup = false and c.status = 'PENDING' ORDER BY c.lastMessageTime ASC")
+    @Query("SELECT c FROM Chat c WHERE c.webInstance.user.id = :userId AND c.column = :column AND c.isGroup = false and c.status IN  ('PENDING', 'PROCESSING') ORDER BY c.lastMessageTime ASC")
     List<Chat> findByUserIdAndColumnAndNotGroupAndStatusIsPending(
             @Param("userId") String userId,
             @Param("column") String column,
