@@ -119,6 +119,7 @@ public class PhotoService {
 
         return photos.stream()
                 .filter(photo -> photo.getDeletedFromChat() == null || !photo.getDeletedFromChat())
+                .filter(photo -> photo.getStatus().equals("SENT"))
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
