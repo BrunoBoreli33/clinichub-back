@@ -10,9 +10,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.TaskScheduler;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
@@ -51,36 +49,6 @@ public class RoutineAutomationService implements CommandLineRunner {
     private static final String REPESCAGEM_COLUMN = "followup"; // Coluna de acompanhamento automático
     private static final String LEAD_FRIO_COLUMN = "cold_lead"; // Coluna de leads frios (sem resposta)
 
-    /*
-    // Método executado automaticamente a cada minuto
-    @Scheduled(cron = "0 * 8-19 * * MON-FRI", zone = "America/Sao_Paulo")
-    public void processRoutineAutomation() {
-        log.info("🤖 Iniciando processamento de rotinas automáticas");
-
-
-        if (isFeriado(LocalDate.now())) {
-            log.info("Processamento abortado: Hoje é feriado.");
-            return;
-        }
-
-        try {
-            // Busca todos os usuários cadastrados no sistema
-            List<User> users = userRepository.findAll();
-
-            // Para cada usuário, processa suas rotinas de mensagens
-            for (User user : users) {
-                processUserRoutines(user);
-            }
-
-            log.info("✅ Processamento de rotinas automáticas concluído");
-        } catch (Exception e) {
-            // Registra qualquer erro que ocorra durante o processamento
-            log.error("❌ Erro ao processar rotinas automáticas", e);
-        }
-    }
-
-     */
-
     private void scheduleNext() {
         LocalDateTime now = LocalDateTime.now(ZoneId.of("America/Sao_Paulo"));
         long delay;
@@ -106,7 +74,6 @@ public class RoutineAutomationService implements CommandLineRunner {
             }
         }, Instant.now().plusMillis(delay));
     }
-
 
     private void executeProcess() {
         log.info("🤖 Iniciando processamento de rotinas automáticas");
@@ -720,71 +687,73 @@ public class RoutineAutomationService implements CommandLineRunner {
 
         String messageToSend = receiverName + ", " + routine.getTextContent();
         // ===== PASSO 1: Enviar mensagem de texto =====
-        zapiMessageService.sendTextMessage(
+        boolean result = zapiMessageService.sendTextMessage(
                 webInstance,
                 chat.getPhone(),
                 messageToSend,
                 true
         );
 
-        // ===== PASSO 2: Enviar fotos (se houver) =====
-        List<Photo> photos = getRoutinePhotos(routine);
-        if (!photos.isEmpty()) {
-            log.info("📷 [CHAT: {}] Enviando {} foto(s)", chat.getId(), photos.size());
-            for (Photo photo : photos) {
+        if(result) {
+            // ===== PASSO 2: Enviar fotos (se houver) =====
+            List<Photo> photos = getRoutinePhotos(routine);
+            if (!photos.isEmpty()) {
+                log.info("📷 [CHAT: {}] Enviando {} foto(s)", chat.getId(), photos.size());
+                for (Photo photo : photos) {
 
-                try {
-                    photoService.saveOutgoingPhoto(
-                            chat.getId(),
+                    try {
+                        photoService.saveOutgoingPhoto(
+                                chat.getId(),
+                                chat.getPhone(),
+                                photo.getImageUrl(),
+                                webInstance.getId(),
+                                null
+                        );
+                    } catch (DataIntegrityViolationException e) {
+                        log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
+                    }
+
+                    zapiMessageService.sendImage(
+                            webInstance,
                             chat.getPhone(),
                             photo.getImageUrl(),
-                            webInstance.getId(),
-                            null
+                            true
                     );
-                } catch (DataIntegrityViolationException e) {
-                    log.warn("⚠️ Erro de duplicação ao salvar foto. Continuando...");
+
                 }
-
-                zapiMessageService.sendImage(
-                        webInstance,
-                        chat.getPhone(),
-                        photo.getImageUrl(),
-                        true
-                );
-
             }
-        }
 
-        // ===== PASSO 3: Enviar vídeos (se houver) =====
-        List<Video> videos = getRoutineVideos(routine);
-        if (!videos.isEmpty()) {
-            log.info("🎥 [CHAT: {}] Enviando {} vídeo(s)", chat.getId(), videos.size());
-            for (Video video : videos) {
+            // ===== PASSO 3: Enviar vídeos (se houver) =====
+            List<Video> videos = getRoutineVideos(routine);
+            if (!videos.isEmpty()) {
+                log.info("🎥 [CHAT: {}] Enviando {} vídeo(s)", chat.getId(), videos.size());
+                for (Video video : videos) {
 
-                try {
-                    videoService.saveOutgoingVideo(
-                            chat.getId(),
+                    try {
+                        videoService.saveOutgoingVideo(
+                                chat.getId(),
+                                chat.getPhone(),
+                                video.getVideoUrl(),
+                                webInstance.getId(),
+                                null
+                        );
+                    } catch (DataIntegrityViolationException e) {
+                        log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
+                    }
+
+                    zapiMessageService.sendVideo(
+                            webInstance,
                             chat.getPhone(),
                             video.getVideoUrl(),
-                            webInstance.getId(),
-                            null
+                            true
                     );
-                } catch (DataIntegrityViolationException e) {
-                    log.warn("⚠️ Erro de duplicação ao salvar vídeo. Continuando...");
+
                 }
-
-                zapiMessageService.sendVideo(
-                        webInstance,
-                        chat.getPhone(),
-                        video.getVideoUrl(),
-                        true
-                );
-
             }
+
         }
 
     }
-
 
     private static final List<String> GREETINGS = List.of(
             "Olá ",

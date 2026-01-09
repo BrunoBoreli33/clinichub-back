@@ -25,7 +25,7 @@ public class ZapiMessageService {
     private static final String ZAPI_BASE_URL = "https://api.z-api.io";
     private final RestTemplate restTemplate;
 
-    public void sendTextMessage(WebInstance instance, String phone, String message, boolean isAutomatedRoutine) {
+    public boolean sendTextMessage(WebInstance instance, String phone, String message, boolean isAutomatedRoutine) {
 
         int delayToSend = 1;
 
@@ -65,6 +65,8 @@ public class ZapiMessageService {
             var result = response.getBody();
             log.info("✅ Mensagem enviada com sucesso - MessageId: {}",
                     result != null ? result.get("messageId") : "N/A");
+
+            return true;
 
         } catch (Exception e) {
             log.error("❌ Erro ao enviar mensagem", e);
