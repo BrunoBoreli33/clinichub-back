@@ -270,7 +270,7 @@ public class ChatService {
 
         } catch (Exception e) {
             log.error("❌ Erro ao sincronizar chats para usuário {}: {}", user.getId(), e.getMessage(), e);
-            return buildErrorResponse(e.getMessage());
+            throw e;
         }
     }
 
