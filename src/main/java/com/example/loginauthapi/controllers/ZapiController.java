@@ -11,6 +11,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.List;
 import java.util.Map;
 
@@ -113,10 +115,15 @@ public class ZapiController {
 
         } catch (Exception e) {
             log.error("Erro ao processar requisição de chats", e);
+
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+
             return ResponseEntity.internalServerError()
                     .body(ChatsListResponseDTO.builder()
                             .success(false)
-                            .message("Erro interno ao processar solicitação: " + e.getMessage())
+                            .message("Erro interno ao processar solicitação: " + sw.toString())
                             .totalChats(0)
                             .unreadCount(0)
                             .build());
