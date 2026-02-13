@@ -1,143 +1,167 @@
 <h1 align="center" style="font-weight: bold;">WhatsApp CRM 💻</h1>
 
 <p align="center">
- <a href="#tech">Technologies</a> • 
- <a href="#started">Getting Started</a> • 
+ <a href="#tech">Tecnologias</a> • 
+ <a href="#started">Início</a> • 
   <a href="#routes">API Endpoints</a> •
- <a href="#colab">Collaborators</a> •
- <a href="#contribute">Contribute</a>
+ <a href="#contribute">Contribuir</a>
 </p>
 
 <p align="center">
-    <b>Simple description of what your project do or how to use it.</b>
+    <b>Plataforma de CRM integrada à API do WhatsApp que automatiza toda a gestão e nutrição de leads, otimizando o atendimento e aumentando a conversão de clientes para empresas.</b>
 </p>
 
-<h2 id="technologies">💻 Technologies</h2>
+<h2 id="technologies">💻 Tecnologias</h2>
 
-- list of all technologies you used
-- Java
-- MongoDB
-- NodeJS
+### <h3 align="left">Framework e Linguagem:</h3>
 
-<h2 id="started">🚀 Getting started</h2>
+- Java 17
+- Spring Boot 3.2.4
+- Spring Framework (Web, Security, Data JPA, Validation, Retry, Aspects)
 
-Here you describe how to run your project locally
+### <h3 align="left">Banco de Dados:</h3>
 
-<h3>Prerequisites</h3>
+- PostgreSQL 42.6.0
+- Flyway (Migrações de banco de dados)
+- Spring Data JPA / Hibernate (ORM)
 
-Here you list all prerequisites necessary for running your project. For example:
+### <h3 align="left">Segurança e Autenticação:</h3>
 
-- [NodeJS](https://github.com/)
-- [Git 2](https://github.com)
+- Spring Security
+- Auth0 Java JWT 4.4.0 (Geração e validação de tokens JWT)
 
-<h3>Cloning</h3>
+### <h3 align="left">Utilitários e Bibliotecas:</h3>
 
-How to clone your project
+- Lombok (Redução de boilerplate)
+- Jackson (Serialização/deserialização JSON)
+- Jackson Datatype JSR310 (Suporte para LocalDateTime)
+- Spring Dotenv 4.0.0 (Variáveis de ambiente)
+- ZXing 3.5.1 (Geração de QR Codes)
+- Caffeine (Cache em memória)
+- Spring Retry (Retry automático)
+- Spring Aspects (AOP - Programação Orientada a Aspectos)
+
+### <h3 align="left">Comunicação e Email:</h3>
+
+- Resend Java 3.1.0 (Serviço de envio de emails)
+- RestTemplate/WebClient (Cliente HTTP)
+
+### <h3 align="left">Documentação e Monitoramento:</h3>
+
+- SpringDoc OpenAPI 2.3.0 (Documentação Swagger/OpenAPI)
+- Spring Boot Actuator (Métricas e health checks)
+
+### <h3 align="left">Desenvolvimento:</h3>
+
+- Spring Boot DevTools (Hot reload)
+- Maven (Gerenciamento de dependências)
+
+### <h3 align="left">Agendamento:</h3>
+
+- Spring Scheduling (@EnableScheduling)
+- Spring Async (@EnableAsync)
+
+### <h3 align="left">FUNCIONALIDADES:</h3>
+
+- Autenticação e Autorização: Login, registro, JWT tokens, refresh tokens
+- Gerenciamento de Usuários: Perfis, preferências, emails
+- Recuperação de Senha: Códigos de reset, validação
+- Campanhas: Criação e gerenciamento de campanhas
+- Mensagens/Chat: Sistema de mensagens com WhatsApp
+- Tarefas: Sistema de tarefas agendadas
+- Tags: Sistema de etiquetas/tags
+- Rotinas Automatizadas: Textos automáticos programados
+- Webhooks: Integração com serviços externos
+- Notificações: Sistema de notificações
+- Instâncias Web: Gerenciamento de instâncias (provavelmente WhatsApp)
+- Dashboard: Estatísticas e métricas
+- Textos Pré-configurados: Templates de mensagens
+- Integração ZAPI: API externa para WhatsApp
+
+---
+
+<h2 id="started">🚀 Começando</h2>
+
+<h3>Pré-Requisitos</h3>
+
+
+- Java 17 SDK
+- Maven
+- PostgreSQL versão 15.16
+- Z-API
+- Resend
+- Configure um domínio no Resend para o envio de e-mails (Você deverá ter um domínio)
+
+---
+
+<h3>Para rodar o Backend Utilizaremos o Intellij Pro, e devemos configurar as seguintes variáveis de ambiente:</h3>
+
+- DB_PASSWORD -> Senha do seu banco de dados PostgreSQL
+- RESEND_API_KEY -> Chave API do Resend
+
+---
+
+<h3>Após abrir o projeto do backend utilizando o intellij:</h3>
+
+- Abrir o application.properties e configurar o parâmetro "spring.datasource.url" (para o mesmo do seu banco de dados)
+- Instalar FFMPEG -> Para isso deve-se ter instalado o gerenciador de pacotes chocolatey, depois deve-se abrir o PowerShell no modo admin e digitar o comando "choco install ffmpeg -y"
+- Para rodar o FFMPEG no Intellij, deve-se adicionar variável de ambiente: "C:\ProgramData\chocolatey\bin", no sistema operacional.
+- Ir na pasta "Services" e em "EmailService" e configurar todos os emails que começam com "contato@". E colocar o nome do seu domínio depois do "@", ficando por exemplo "contato@patriciafernanda.com". (Esse é o mesmo domínio que foi registrado na sua conta do resend).
+- A Documentação da API está feita em swagger na url: http://localhost:8081/swagger-ui/index.html#/
+- Configurar o z-api (https://app.z-api.io/app)
+- Depois de fazer o cadastro, vá para a página "https://app.z-api.io/app/security" e crie o token de segurança da conta.
+
+---
+
+<h3>Agora para conectar a instância do Z-API á nossa API do WhatsApp CRM:</h3>
+
+- Após rodar o Backend e o Frontend, ir na URL "http://localhost:8080/admin" e inserir as informações do Z-API nos campos de "Adicionar Instância"
+- Logo após, ir na url "http://localhost:8080/dashboard" e scanear o QRCode do mesmo jeito que conecta ao whatsapp web.
+
+---
+
+<h3>Por fim, para receber mensagens no sistema, precisamos configurar o Ngrok (se quiser receber as mensagem em ambiente localhost):</h3>
+
+<h3>Na instância do Z-API, na aba "WebHook e Configurações Gerais", se for usar ngrok, colocar uma url abaixo no campo "Ao Receber" do z-api, e é necessário ativar a opção "Notificar as Enviadas por mim também"</h3>
+
+- Ngrok: https://deloras-achromatous-mathilde.ngrok-free.dev/webhook/message
+
+<h3>E caso for configurar em nuvem, a url ficará algo como:</h3>
+
+- Vercel: https://api.hubcrm.com/webhook/message
+
+---
+
+<h3>Clonagem</h3>
+
+Como clonar seu projeto
 
 ```bash
-git clone your-project-url-in-github
+git clone git@github.com:BrunoBoreli33/clinichub-back.git
 ```
 
-<h3>Config .env variables</h2>
+<h3>Iniciando o Projeto</h3>
 
-Use the `.env.example` as reference to create your configuration file `.env` with your AWS Credentials
-
-```yaml
-NODE_AWS_REGION=us-east-1
-NODE_AWS_KEY_ID={YOUR_AWS_KEY_ID}
-NODE_AWS_SECRET={YOUR_AWS_SECRET}
-```
-
-<h3>Starting</h3>
-
-How to start your project
+Para Startar o Frontend, digite no terminal:
 
 ```bash
-cd project-name
-npm some-command-to-run
+npm run dev
 ```
 
 <h2 id="routes">📍 API Endpoints</h2>
 
-Here you can list the main routes of your API, and what are their expected request bodies.
-​
-| route               | description                                          
-|----------------------|-----------------------------------------------------
-| <kbd>GET /authenticate</kbd>     | retrieves user info see [response details](#get-auth-detail)
-| <kbd>POST /authenticate</kbd>     | authenticate user into the api see [request details](#post-auth-detail)
+Todos os EndPoints estão disponíveis após rodar o backend e o frontend na url:
 
-<h3 id="get-auth-detail">GET /authenticate</h3>
-
-**RESPONSE**
-```json
-{
-  "name": "Fernanda Kipper",
-  "age": 20,
-  "email": "her-email@gmail.com"
-}
+```bash
+http://localhost:8081/swagger-ui/index.html#/
 ```
 
-<h3 id="post-auth-detail">POST /authenticate</h3>
 
-**REQUEST**
-```json
-{
-  "username": "fernandakipper",
-  "password": "4444444"
-}
-```
+<h2 id="contribute">📫 Contribuir</h2>
 
-**RESPONSE**
-```json
-{
-  "token": "OwoMRHsaQwyAgVoc3OXmL1JhMVUYXGGBbCTK0GBgiYitwQwjf0gVoBmkbuyy0pSi"
-}
-```
+1. `git clone git@github.com:BrunoBoreli33/clinichub-back.git`
+2. Crie uma branch para cada funcionalidade ou correção nova
+3. Siga os padrões de commit
+4. Abra um Pull Request explicando o problema resolvido ou a funcionalidade implementada, se houver, anexe uma captura de tela das modificações visuais e aguarde a revisão!
 
-<h2 id="colab">🤝 Collaborators</h2>
 
-Special thank you for all people that contributed for this project.
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="#">
-        <img src="https://avatars.githubusercontent.com/u/61896274?v=4" width="100px;" alt="Fernanda Kipper Profile Picture"/><br>
-        <sub>
-          <b>Fernanda Kipper</b>
-        </sub>
-      </a>
-    </td>
-    <td align="center">
-      <a href="#">
-        <img src="https://t.ctcdn.com.br/n7eZ74KAcU3iYwnQ89-ul9txVxc=/400x400/smart/filters:format(webp)/i490769.jpeg" width="100px;" alt="Elon Musk Picture"/><br>
-        <sub>
-          <b>Elon Musk</b>
-        </sub>
-      </a>
-    </td>
-    <td align="center">
-      <a href="#">
-        <img src="https://miro.medium.com/max/360/0*1SkS3mSorArvY9kS.jpg" width="100px;" alt="Foto do Steve Jobs"/><br>
-        <sub>
-          <b>Steve Jobs</b>
-        </sub>
-      </a>
-    </td>
-  </tr>
-</table>
-
-<h2 id="contribute">📫 Contribute</h2>
-
-Here you will explain how other developers can contribute to your project. For example, explaining how can create their branches, which patterns to follow and how to open an pull request
-
-1. `git clone https://github.com/Fernanda-Kipper/text-editor.git`
-2. `git checkout -b feature/NAME`
-3. Follow commit patterns
-4. Open a Pull Request explaining the problem solved or feature made, if exists, append screenshot of visual modifications and wait for the review!
-
-<h3>Documentations that might help</h3>
-
-[📝 How to create a Pull Request](https://www.atlassian.com/br/git/tutorials/making-a-pull-request)
-
-[💾 Commit pattern](https://gist.github.com/joshbuchea/6f47e86d2510bce28f8e7f42ae84c716)
