@@ -73,10 +73,9 @@
 - Rotinas Automatizadas: Textos automáticos programados
 - Webhooks: Integração com serviços externos
 - Notificações: Sistema de notificações
-- Instâncias Web: Gerenciamento de instâncias (provavelmente WhatsApp)
 - Dashboard: Estatísticas e métricas
 - Textos Pré-configurados: Templates de mensagens
-- Integração ZAPI: API externa para WhatsApp
+- Integração Z-API: API externa para WhatsApp
 
 ---
 
@@ -86,7 +85,6 @@
 
 
 - Java 17 SDK
-- Maven
 - PostgreSQL versão 15.16
 - Z-API
 - Resend
@@ -94,39 +92,39 @@
 
 ---
 
-<h3>Para rodar o Backend Utilizaremos o Intellij Pro, e devemos configurar as seguintes variáveis de ambiente:</h3>
+<h3>Para rodar o Backend utilizaremos o Intellij IDEA, e devemos configurar as seguintes variáveis de ambiente:</h3>
 
 - DB_PASSWORD -> Senha do seu banco de dados PostgreSQL
 - RESEND_API_KEY -> Chave API do Resend
 
 ---
 
-<h3>Após abrir o projeto do backend utilizando o intellij:</h3>
+<h3>Após abrir o projeto do backend utilizando o Intellij:</h3>
 
-- Abrir o application.properties e configurar o parâmetro "spring.datasource.url" (para o mesmo do seu banco de dados)
-- Instalar FFMPEG -> Para isso deve-se ter instalado o gerenciador de pacotes chocolatey, depois deve-se abrir o PowerShell no modo admin e digitar o comando "choco install ffmpeg -y"
+- Abrir o application.properties e configurar o parâmetro "spring.datasource.url" (conforme o seu PostgreSQL)
+- Instalar FFMPEG -> Para isso deve-se ter instalado o gerenciador de pacotes Chocolatey, depois deve-se abrir o PowerShell no modo Admin e digitar o comando "choco install ffmpeg -y"
 - Para rodar o FFMPEG no Intellij, deve-se adicionar variável de ambiente: "C:\ProgramData\chocolatey\bin", no sistema operacional.
-- Ir na pasta "Services" e em "EmailService" e configurar todos os emails que começam com "contato@". E colocar o nome do seu domínio depois do "@", ficando por exemplo "contato@patriciafernanda.com". (Esse é o mesmo domínio que foi registrado na sua conta do resend).
-- A Documentação da API está feita em swagger na url: http://localhost:8081/swagger-ui/index.html#/
-- Configurar o z-api (https://app.z-api.io/app)
+- Vá até a pasta "Services" e em "EmailService.java" e configure todos os emails que começam com "contato@". E coloque o nome do seu domínio depois do "@", ficando por exemplo "contato@patriciafernanda.com". (Esse deverá ser o mesmo domínio que foi registrado na sua conta do Resend).
+- A Documentação da API está feita em Swagger na url: http://localhost:8081/swagger-ui/index.html#/
+- Cadastre-se no Z-API (https://app.z-api.io/app)
 - Depois de fazer o cadastro, vá para a página "https://app.z-api.io/app/security" e crie o token de segurança da conta.
 
 ---
 
-<h3>Agora para conectar a instância do Z-API á nossa API do WhatsApp CRM:</h3>
+<h3>Conectando a instância do Z-API ao WhatsApp CRM:</h3>
 
-- Após rodar o Backend e o Frontend, ir na URL "http://localhost:8080/admin" e inserir as informações do Z-API nos campos de "Adicionar Instância"
-- Logo após, ir na url "http://localhost:8080/dashboard" e scanear o QRCode do mesmo jeito que conecta ao whatsapp web.
+- Após rodar o Backend e o Frontend, vá até a URL "http://localhost:8080/admin" e insira as informações do Z-API no campo de "Adicionar Instância"
+- Logo após, vá até a url "http://localhost:8080/dashboard" e scaneie o QRCode para fazer a conexão do sistema com o seu WhatsApp.
 
 ---
 
-<h3>Por fim, para receber mensagens no sistema, precisamos configurar o Ngrok (se quiser receber as mensagem em ambiente localhost):</h3>
+<h3>Por fim, para receber mensagens no sistema, precisamos configurar o WebHook utilizando o Ngrok (se quiser receber as mensagem em ambiente localhost):</h3>
 
-<h3>Na instância do Z-API, na aba "WebHook e Configurações Gerais", se for usar ngrok, colocar uma url abaixo no campo "Ao Receber" do z-api, e é necessário ativar a opção "Notificar as Enviadas por mim também"</h3>
+<h3>No site do Z-API, na aba "Instâncias WEB", na aba "WebHook e Configurações Gerais", se for usar ngrok, colocar a respectiva url abaixo do campo "Ao Receber" do z-api, e será necessário ativar a opção "Notificar as Enviadas por mim também"</h3>
 
 - Ngrok: https://deloras-achromatous-mathilde.ngrok-free.dev/webhook/message
 
-<h3>E caso for configurar em nuvem, a url ficará algo como:</h3>
+<h3>E caso for configurar em nuvem, a url ficará por exemplo:</h3>
 
 - Vercel: https://api.hubcrm.com/webhook/message
 
@@ -142,7 +140,7 @@ git clone git@github.com:BrunoBoreli33/clinichub-back.git
 
 <h3>Iniciando o Projeto</h3>
 
-Para Startar o Frontend, digite no terminal:
+Para Startar o Frontend, digite no terminal do VSCODE:
 
 ```bash
 npm run dev
@@ -150,7 +148,7 @@ npm run dev
 
 <h2 id="routes">📍 API Endpoints</h2>
 
-Todos os EndPoints estão disponíveis após rodar o backend e o frontend na url:
+Todos os EndPoints estão disponíveis após rodar o Backend e o Frontend na url:
 
 ```bash
 http://localhost:8081/swagger-ui/index.html#/
