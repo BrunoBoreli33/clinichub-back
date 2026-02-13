@@ -24,7 +24,7 @@ public class EmailService {
         String body = "<h2>Seu código de confirmação é:</h2><p><strong>" + code + "</strong></p>";
 
         CreateEmailOptions params = CreateEmailOptions.builder()
-                .from("noreply-clinichubcrm <contato@clinichubcrm.com>")
+                .from("noreply-clinichubcrm <contato@brunoboreli.com>")
                 .to(to)
                 .subject(subject)
                 .html(body)
@@ -59,7 +59,7 @@ public class EmailService {
                 "</div>";
 
         CreateEmailOptions params = CreateEmailOptions.builder()
-                .from("noreply-clinichubcrm <contato@clinichubcrm.com>")
+                .from("noreply-clinichubcrm <contato@brunoboreli.com>")
                 .to(to)
                 .subject(subject)
                 .html(body)
@@ -92,7 +92,7 @@ public class EmailService {
                 "</div>";
 
         CreateEmailOptions params = CreateEmailOptions.builder()
-                .from("noreply-clinichubcrm <contato@clinichubcrm.com>")
+                .from("noreply-clinichubcrm <contato@brunoboreli.com>")
                 .to(to)
                 .subject(subject)
                 .html(body)
@@ -123,7 +123,7 @@ public class EmailService {
                 "</div>";
 
         CreateEmailOptions params = CreateEmailOptions.builder()
-                .from("noreply-clinichubcrm <contato@clinichubcrm.com>")
+                .from("noreply-clinichubcrm <contato@brunoboreli.com>")
                 .to(to)
                 .subject(subject)
                 .html(body)

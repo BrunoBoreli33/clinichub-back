@@ -53,6 +53,11 @@ public class SecurityConfig {
                         .requestMatchers("/webhook/**").permitAll()
                         .requestMatchers("/auth/refresh").permitAll()
 
+                        // Spring Doc
+                        .requestMatchers("/swagger-ui.html").permitAll()
+                        .requestMatchers("/swagger-ui/**").permitAll()
+                        .requestMatchers("/v3/**").permitAll()
+
                         // ✅ NOVO: Endpoint SSE de notificações (autenticado)
                         .requestMatchers("/api/notifications/stream").authenticated()
 
