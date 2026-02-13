@@ -2,7 +2,7 @@
 
 <p align="center">
  <a href="#tech">Tecnologias</a> • 
- <a href="#started">Início</a> • 
+ <a href="#started">Começando</a> • 
   <a href="#routes">API Endpoints</a> •
  <a href="#contribute">Contribuir</a>
 </p>
