@@ -107,18 +107,36 @@
 - Vá até a pasta "Services" e em "EmailService.java" e configure todos os emails que começam com "contato@". E coloque o nome do seu domínio depois do "@", ficando por exemplo "contato@patriciafernanda.com". (Esse deverá ser o mesmo domínio que foi registrado na sua conta do Resend).
 - A Documentação da API está feita em Swagger na url: http://localhost:8081/swagger-ui/index.html#/
 - Cadastre-se no Z-API (https://app.z-api.io/app)
+
+<p align="center">
+    <img src=".github/Fotos Backend/Info da Instância no Z-API.png" alt="Dashboard" width="800px">
+</p>
+
 - Depois de fazer o cadastro, vá para a página "https://app.z-api.io/app/security" e crie o token de segurança da conta.
 
 ---
 
 <h3>Conectando a instância do Z-API ao WhatsApp CRM:</h3>
 
-- Após rodar o Backend e o Frontend, vá até a URL "http://localhost:8080/admin" e insira as informações do Z-API no campo de "Adicionar Instância"
+- Após rodar o Backend e o Frontend, vá até a URL "http://localhost:8080/admin" e insira as informações do Z-API no campo de "Nova WebInstance"
+
+<p align="center">
+    <img src=".github/Fotos Backend/Cadastro de WebInstance.png" alt="Dashboard" width="800px">
+</p>
+
 - Logo após, vá até a url "http://localhost:8080/dashboard" e scaneie o QRCode para fazer a conexão do sistema com o seu WhatsApp.
+
+<p align="center">
+    <img src=".github/Fotos Backend/Conectar WhatsApp.png" alt="Dashboard" width="800px">
+</p>
 
 ---
 
 <h3>Por fim, para receber mensagens no sistema, precisamos configurar o WebHook utilizando o Ngrok (se quiser receber as mensagem em ambiente localhost):</h3>
+
+<p align="center">
+    <img src=".github/Fotos Backend/Config WebHooks.png" alt="Dashboard" width="800px">
+</p>
 
 <h3>No site do Z-API, na aba "Instâncias WEB", na aba "WebHook e Configurações Gerais", se for usar ngrok, colocar a respectiva url abaixo do campo "Ao Receber" do z-api, e será necessário ativar a opção "Notificar as Enviadas por mim também"</h3>
 
